@@ -1,4 +1,5 @@
 /** 頭像放 public/avatars/，檔名可自訂；改此路徑即可換成真立繪 PNG/WebP */
+/** 路徑請勿用「/avatars/」開頭：GitHub Pages 子目錄（如 /RPG/）會變成向網域根目錄要圖而 404；用「avatars/xxx」相對路徑即可。 */
 /** title：角色稱號（純展示，與戰鬥技能表 heroSkills 無關） */
 /** captainPassive：僅當該角為上陣第一位（隊長）時，對全隊生效的被動；effect 由 captainAura 解讀 */
 /** passive：角色常駐被動（不需當隊長也會觸發）；具體觸發點由 App.jsx 解讀 */
@@ -15,7 +16,7 @@ export const HEROES_BASE = [
     def: 80,
     spd: 105,
     title: '燎原之刃',
-    avatar: '/avatars/h1.png',
+    avatar: 'avatars/h1.png',
     captainPassive: {
       name: '燎原誓引',
       description: '全隊攻擊力 +7%。',
@@ -39,7 +40,7 @@ export const HEROES_BASE = [
     def: 100,
     spd: 115,
     title: '疾風旅者',
-    avatar: '/avatars/h2.png',
+    avatar: 'avatars/h2.png',
     captainPassive: {
       name: '疾風起幕',
       description: '全隊速度 +6%（行動條）。',
@@ -63,7 +64,7 @@ export const HEROES_BASE = [
     def: 150,
     spd: 90,
     title: '不動之盾',
-    avatar: '/avatars/h3.png',
+    avatar: 'avatars/h3.png',
     captainPassive: {
       name: '蒼壁加護',
       description: '全隊防禦 +10%。',
@@ -87,7 +88,7 @@ export const HEROES_BASE = [
     def: 60,
     spd: 98,
     title: '淵星術士',
-    avatar: '/avatars/h4.png',
+    avatar: 'avatars/h4.png',
     captainPassive: {
       name: '淵星共鳴',
       description: '全隊魔力 +8%（影響技能為主的傷害）。',
@@ -111,7 +112,7 @@ export const HEROES_BASE = [
     def: 70,
     spd: 102,
     title: '破曉司祭',
-    avatar: '/avatars/h5.png',
+    avatar: 'avatars/h5.png',
     captainPassive: {
       name: '破曉恩寵',
       description: '全隊受到的傷害減少 7%。',
@@ -126,10 +127,10 @@ export const HEROES_BASE = [
 ];
 
 export const MONSTERS_BASE = [
-  { id: 'm1', name: '火史萊姆', type: 'fire', hp: 400, mp: 100, atk: 60, def: 40, spd: 90, avatar: '/avatars/m1.png' },
-  { id: 'm2', name: '風史萊姆', type: 'wind', hp: 350, mp: 100, atk: 50, def: 30, spd: 120, avatar: '/avatars/m2.png' },
-  { id: 'm3', name: '水史萊姆', type: 'water', hp: 500, mp: 100, atk: 40, def: 100, spd: 85, avatar: '/avatars/m3.png' },
-  { id: 'm4', name: '暗史萊姆', type: 'dark', hp: 450, mp: 100, atk: 70, def: 50, spd: 95, avatar: '/avatars/m4.png' },
-  { id: 'm5', name: '光史萊姆', type: 'light', hp: 420, mp: 100, atk: 30, def: 60, spd: 100, avatar: '/avatars/m5.png' },
+  { id: 'm1', name: '火史萊姆', type: 'fire', hp: 400, mp: 100, atk: 60, def: 40, spd: 90, avatar: 'avatars/m1.png' },
+  { id: 'm2', name: '風史萊姆', type: 'wind', hp: 350, mp: 100, atk: 50, def: 30, spd: 120, avatar: 'avatars/m2.png' },
+  { id: 'm3', name: '水史萊姆', type: 'water', hp: 500, mp: 100, atk: 40, def: 100, spd: 85, avatar: 'avatars/m3.png' },
+  { id: 'm4', name: '暗史萊姆', type: 'dark', hp: 450, mp: 100, atk: 70, def: 50, spd: 95, avatar: 'avatars/m4.png' },
+  { id: 'm5', name: '光史萊姆', type: 'light', hp: 420, mp: 100, atk: 30, def: 60, spd: 100, avatar: 'avatars/m5.png' },
 ];
 
