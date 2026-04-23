@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Goblin Vanguard">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fb7185"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+  <circle cx="32" cy="32" r="28" fill="url(#g)"/>
+  <path d="M16 28c5-8 11-12 16-12s11 4 16 12" fill="none" stroke="#7f1d1d" stroke-width="4" stroke-linecap="round" opacity="0.35"/>
+  <circle cx="25" cy="30" r="4" fill="#fff1f2" opacity="0.9"/>
+  <circle cx="39" cy="30" r="4" fill="#fff1f2" opacity="0.9"/>
+  <circle cx="25" cy="30" r="1.6" fill="#111827" opacity="0.75"/>
+  <circle cx="39" cy="30" r="1.6" fill="#111827" opacity="0.75"/>
+  <path d="M22 44c6 4 14 4 20 0" fill="none" stroke="#7f1d1d" stroke-width="4" stroke-linecap="round" opacity="0.35"/>
+  <path d="M32 14l6 10h-12l6-10Z" fill="#fff7ed" opacity="0.35"/>
+</svg>

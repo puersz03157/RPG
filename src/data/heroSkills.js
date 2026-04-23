@@ -26,12 +26,12 @@ export const SKILLS_BY_HERO_ID = {
   h4: [
     { id: 'h4-1', name: '暗引力', mpCost: 20, scale: 'matk', effect: { type: 'damage', target: 'enemy-single', powerMul: 1 } },
     { id: 'h4-2', name: '影蝕', mpCost: 18, scale: 'matk', effect: { type: 'debuff', target: 'enemy-single', stat: 'def+mdef', mul: 0.8, turns: 2, damageMul: 0.35 } },
-    { id: 'h4-3', name: '虛空裂', mpCost: 34, scale: 'matk', effect: { type: 'damage', target: 'enemy-single', powerMul: 1.3 } },
+    { id: 'h4-3', name: '凝滯域', mpCost: 32, scale: 'matk', effect: { type: 'debuff', target: 'enemy-all', stat: 'spd', mul: 0.82, turns: 2 } },
     { id: 'h4-4', name: '星隕', mpCost: 42, scale: 'matk', effect: { type: 'damage', target: 'enemy-single', powerMul: 1.48 } },
   ],
   h5: [
     { id: 'h5-1', name: '聖治癒', mpCost: 20, scale: 'matk', effect: { type: 'heal', target: 'ally-single', powerMul: 1.05 } },
-    { id: 'h5-2', name: '淨化光', mpCost: 15, scale: 'matk', effect: { type: 'damage', target: 'enemy-single', powerMul: 0.78 } },
+    { id: 'h5-2', name: '恩澤迴響', mpCost: 16, scale: 'matk', effect: { type: 'regen', target: 'ally-all', turns: 3, powerMul: 0.24 } },
     { id: 'h5-3', name: '裁決束', mpCost: 30, scale: 'matk', effect: { type: 'damage', target: 'enemy-single', powerMul: 1.2 } },
     { id: 'h5-4', name: '天罰', mpCost: 40, scale: 'matk', effect: { type: 'damage', target: 'enemy-single', powerMul: 1.4 } },
   ],

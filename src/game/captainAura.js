@@ -62,6 +62,8 @@ export function buildBattleHeroesWithAura(roster, captainId) {
       atkBuffTurns: 0,
       atkBuffMul: 1,
       incomingDmgMul,
+      regenTurns: 0,
+      regenHeal: 0,
     };
   });
 

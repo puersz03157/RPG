@@ -8,6 +8,49 @@ export function getSkillTargeting(skill) {
   return { requiresTarget: true, side: 'enemy', mode: 'single' };
 }
 
+/** 怪物行動條用有效速度（減速 debuff 時低於基礎 spd） */
+export function getEffectiveSpd(unit) {
+  if (!unit) return 1;
+  const base = unit.spd ?? 1;
+  if (unit.isHero) return Math.max(1, base);
+  const turns = unit.spdDownTurns ?? 0;
+  const mul = turns > 0 ? (typeof unit.spdDownMul === 'number' ? unit.spdDownMul : 1) : 1;
+  return Math.max(1, Math.floor(base * mul));
+}
+
+/** spd 變動時重算 av，使行動條位置與新速度一致（變慢則 av 變大、變快則 av 變小） */
+export function rescaleAvForSpdChange(prevAv, oldEffSpd, newEffSpd) {
+  if (oldEffSpd <= 0 || newEffSpd <= 0) return prevAv;
+  if (oldEffSpd === newEffSpd) return prevAv;
+  return prevAv * (oldEffSpd / newEffSpd);
+}
+
+/** 每回合開始觸發一次的緩回量（依施術者當下 matk） */
+export function resolveRegenHealPerTick(caster, effect) {
+  const powerMul = effect?.powerMul ?? 0.2;
+  const matk = caster?.matk ?? 0;
+  return Math.max(1, Math.floor(matk * powerMul * 0.28));
+}
+
+export function getRegenAllDef(skill) {
+  const effect = skill?.effect;
+  if (!effect || effect.type !== 'regen' || effect.target !== 'ally-all') return null;
+  return {
+    turns: Math.max(1, effect.turns ?? 1),
+    powerMul: typeof effect.powerMul === 'number' ? effect.powerMul : 0.2,
+  };
+}
+
+export function getSlowAllDef(skill) {
+  const effect = skill?.effect;
+  if (!effect || effect.type !== 'debuff' || effect.target !== 'enemy-all') return null;
+  if (effect.stat !== 'spd') return null;
+  return {
+    turns: Math.max(1, effect.turns ?? 1),
+    mul: typeof effect.mul === 'number' ? effect.mul : 0.85,
+  };
+}
+
 /**
  * 技能結算雛形：先支援 enemy-single 的 damage。
  * 後續要擴充治療/狀態/全體，只要在這裡加 effect.type 分支。

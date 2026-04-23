@@ -39,5 +39,14 @@ export function savePartyIds(ids) {
   }
 }
 
+export function clearPartyStorage() {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export const MIN_PARTY = 1;
 export const MAX_PARTY = 5;

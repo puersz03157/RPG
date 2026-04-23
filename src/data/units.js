@@ -127,10 +127,65 @@ export const HEROES_BASE = [
 ];
 
 export const MONSTERS_BASE = [
-  { id: 'm1', name: '火史萊姆', type: 'fire', hp: 400, mp: 100, atk: 60, def: 40, spd: 90, avatar: 'avatars/m1.png' },
-  { id: 'm2', name: '風史萊姆', type: 'wind', hp: 350, mp: 100, atk: 50, def: 30, spd: 120, avatar: 'avatars/m2.png' },
-  { id: 'm3', name: '水史萊姆', type: 'water', hp: 500, mp: 100, atk: 40, def: 100, spd: 85, avatar: 'avatars/m3.png' },
-  { id: 'm4', name: '暗史萊姆', type: 'dark', hp: 450, mp: 100, atk: 70, def: 50, spd: 95, avatar: 'avatars/m4.png' },
-  { id: 'm5', name: '光史萊姆', type: 'light', hp: 420, mp: 100, atk: 30, def: 60, spd: 100, avatar: 'avatars/m5.png' },
+  { id: 'm1', name: '火史萊姆', type: 'fire', hp: 400, mp: 100, atk: 60, def: 40, spd: 90, avatar: 'avatars/m1.png', xpReward: 28 },
+  { id: 'm2', name: '風史萊姆', type: 'wind', hp: 350, mp: 100, atk: 50, def: 30, spd: 120, avatar: 'avatars/m2.png', xpReward: 34 },
+  { id: 'm3', name: '水史萊姆', type: 'water', hp: 500, mp: 100, atk: 40, def: 100, spd: 85, avatar: 'avatars/m3.png', xpReward: 42 },
+  { id: 'm4', name: '暗史萊姆', type: 'dark', hp: 450, mp: 100, atk: 70, def: 50, spd: 95, avatar: 'avatars/m4.png', xpReward: 38 },
+  { id: 'm5', name: '光史萊姆', type: 'light', hp: 420, mp: 100, atk: 30, def: 60, spd: 100, avatar: 'avatars/m5.png', xpReward: 32 },
+];
+
+export const MONSTER_CATALOG = {
+  // 第二章：哥布林 / 骷髏（先沿用既有元素 type 以套用怪物基本技能）
+  goblinGuard: {
+    id: 'g-guard',
+    name: '哥布林守衛',
+    type: 'wind',
+    hp: 520,
+    mp: 100,
+    atk: 55,
+    def: 95,
+    spd: 88,
+    avatar: 'avatars/goblin_guard.svg',
+    xpReward: 48,
+  },
+  goblinVanguard: {
+    id: 'g-vanguard',
+    name: '哥布林先鋒兵',
+    type: 'fire',
+    hp: 420,
+    mp: 100,
+    atk: 78,
+    def: 55,
+    spd: 112,
+    avatar: 'avatars/goblin_vanguard.svg',
+    xpReward: 52,
+  },
+  skeletonArcher: {
+    id: 's-archer',
+    name: '骷髏弓箭手',
+    type: 'dark',
+    hp: 380,
+    mp: 100,
+    atk: 85,
+    def: 45,
+    spd: 118,
+    avatar: 'avatars/skeleton_archer.svg',
+    xpReward: 56,
+  },
+};
+
+export const STAGES = [
+  {
+    id: 'stage-1',
+    title: '第一章：史萊姆棲息地',
+    subtitle: '初入邊境 · 試煉開始',
+    monsters: [...MONSTERS_BASE],
+  },
+  {
+    id: 'stage-2',
+    title: '第二章：荒廢哨站',
+    subtitle: '哥布林巡邏 · 枯骨埋伏',
+    monsters: [MONSTER_CATALOG.goblinGuard, MONSTER_CATALOG.goblinVanguard, MONSTER_CATALOG.skeletonArcher],
+  },
 ];
 

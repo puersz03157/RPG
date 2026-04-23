@@ -17,17 +17,39 @@ import {
   AlertTriangle,
   Users,
   Home,
+  Settings,
   MessageSquare,
   ChevronLeft,
   Check,
   Crown,
 } from 'lucide-react';
-import { HEROES_BASE, MONSTERS_BASE } from './data/units.js';
+import { HEROES_BASE, MONSTERS_BASE, STAGES } from './data/units.js';
 import { getSkillsForHero } from './data/heroSkills.js';
 import { getMonsterBasicSkill } from './data/monsterSkills.js';
-import { loadPartyIds, savePartyIds, MIN_PARTY, MAX_PARTY } from './lib/partyStorage.js';
+import { loadPartyIds, savePartyIds, clearPartyStorage, MIN_PARTY, MAX_PARTY } from './lib/partyStorage.js';
+import {
+  loadHeroXpMap,
+  awardPartyXp,
+  applyLevelLinearStatsToHero,
+  defaultProgress,
+  sumMonstersXpReward,
+  xpRequiredForNextLevel,
+  clearHeroXpStorage,
+} from './lib/heroXpStorage.js';
 import { buildBattleHeroesWithAura, getCaptainPassiveDef } from './game/captainAura.js';
-import { getBuffAllDef, getDebuffDef, getBarrierDef, getSkillTargeting, resolveSkillDamage, resolveSkillHeal } from './game/skills.js';
+import {
+  getBuffAllDef,
+  getDebuffDef,
+  getBarrierDef,
+  getSkillTargeting,
+  resolveSkillDamage,
+  resolveSkillHeal,
+  getEffectiveSpd,
+  rescaleAvForSpdChange,
+  resolveRegenHealPerTick,
+  getRegenAllDef,
+  getSlowAllDef,
+} from './game/skills.js';
 import CmdBtn from './components/CmdBtn.jsx';
 import NavBtn from './components/NavBtn.jsx';
 import HeroAvatar from './components/HeroAvatar.jsx';
@@ -56,10 +78,19 @@ export default function App() {
   const [turnSeq, setTurnSeq] = useState(0);
   const [statusFocus, setStatusFocus] = useState(null); // { side: 'hero' | 'monster', id: string }
   const [skillInfo, setSkillInfo] = useState(null); // skill object for modal
+  const [passiveInfo, setPassiveInfo] = useState(null); // { name, description, mechanics } from units.passive
   const [partyIds, setPartyIds] = useState(() => loadPartyIds());
   const [partyNotice, setPartyNotice] = useState('');
+  const [victoryXpReport, setVictoryXpReport] = useState(null);
+  const [selectedStageId, setSelectedStageId] = useState('stage-1');
+  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
+  const [resetAccountModalOpen, setResetAccountModalOpen] = useState(false);
+  const [resetConfirmInput, setResetConfirmInput] = useState('');
+  const [resetConfirmError, setResetConfirmError] = useState('');
   const longPressTimerRef = useRef(null);
   const longPressFiredRef = useRef(false);
+  const passiveLongPressTimerRef = useRef(null);
+  const passiveLongPressFiredRef = useRef(false);
 
   useEffect(() => {
     savePartyIds(partyIds);
@@ -69,6 +100,13 @@ export default function App() {
     partyIds
       .map((id) => HEROES_BASE.find((u) => u.id === id))
       .filter(Boolean);
+
+  const grantVictory = (battleMonsters) => {
+    const totalXp = sumMonstersXpReward(battleMonsters ?? monsters);
+    const { lines } = awardPartyXp(partyIds, totalXp);
+    setVictoryXpReport(lines);
+    setScene('victory');
+  };
 
   const togglePartyMember = (heroId) => {
     setPartyNotice('');
@@ -96,12 +134,16 @@ export default function App() {
     });
   };
 
-  const startBattle = () => {
-    const roster = rosterFromParty();
+  const startBattle = (stageId = selectedStageId) => {
+    const xpMap = loadHeroXpMap();
+    const roster = rosterFromParty().map((u) => applyLevelLinearStatsToHero(u, xpMap[u.id] ?? defaultProgress()));
     if (roster.length < MIN_PARTY) return;
     const { heroes: h, auraLine } = buildBattleHeroesWithAura(roster, partyIds[0]);
-    const m = MONSTERS_BASE.map((u) => ({
+    const stage = STAGES.find((s) => s.id === stageId) ?? STAGES[0];
+    const baseMonsters = stage?.monsters ?? MONSTERS_BASE;
+    const m = baseMonsters.map((u, i) => ({
       ...u,
+      id: `${u.id}-${i}`,
       curHp: u.hp,
       curMp: u.mp ?? MP_MAX,
       mdef: u.mdef ?? u.def,
@@ -110,14 +152,17 @@ export default function App() {
       defDownMul: 1,
       mdefDownTurns: 0,
       mdefDownMul: 1,
+      spdDownTurns: 0,
+      spdDownMul: 1,
       av: 10000 / u.spd,
       isHero: false,
     }));
     setHeroes(h);
     setMonsters(m);
     setTurnSeq(0);
+    setSelectedStageId(stage?.id ?? stageId);
     setScene('battle');
-    setLogs(['戰鬥開始！史萊姆出現了。', ...(auraLine ? [auraLine] : [])].slice(0, 5));
+    setLogs([`戰鬥開始！${stage?.title ?? '未知關卡'}`, ...(auraLine ? [auraLine] : [])].slice(0, 5));
     calculateNextTurn(h, m);
   };
 
@@ -128,21 +173,41 @@ export default function App() {
 
     // 防禦沒被打的 MP 補償：在輪到本人行動時檢查（避免立即給，並可與被打回 MP 互斥）
     const next = sorted[0];
-    // 回合開始被動（例：熊吉 turnStartMp）
-    if (next?.isHero && next.passive?.effect?.type === 'turnStartMp') {
-      const gain = next.passive.effect.value ?? 0;
-      if (gain > 0) {
-        const updated = hList.map((h) => (h.id === next.id ? { ...h, curMp: Math.min(MP_MAX, h.curMp + gain) } : h));
-        setHeroes(updated);
+    let heroPatch = hList;
+    if (next?.isHero) {
+      const id = next.id;
+      const mpGain = next.passive?.effect?.type === 'turnStartMp' ? (next.passive.effect.value ?? 0) : 0;
+      if (mpGain > 0) {
+        heroPatch = heroPatch.map((h) => (h.id === id ? { ...h, curMp: Math.min(MP_MAX, h.curMp + mpGain) } : h));
       }
+      let cur = heroPatch.find((h) => h.id === id) ?? next;
+      if ((cur.regenTurns ?? 0) > 0 && (cur.regenHeal ?? 0) > 0) {
+        const heal = cur.regenHeal;
+        heroPatch = heroPatch.map((h) =>
+          h.id === id
+            ? {
+                ...h,
+                curHp: Math.min(h.hp, h.curHp + heal),
+                regenTurns: Math.max(0, (h.regenTurns ?? 0) - 1),
+              }
+            : h
+        );
+        setLogs([`${cur.name} 緩回 +${heal}`, ...logs].slice(0, 5));
+        cur = heroPatch.find((h) => h.id === id) ?? cur;
+      }
+      if (heroPatch !== hList) setHeroes(heroPatch);
     }
+
     if (next?.isHero && next.status === 'guard' && (next.guardStartTurnSeq ?? -1) >= 0) {
+      const id = next.id;
       const guardSeq = next.guardStartTurnSeq ?? -1;
-      const hasHitMpThisGuard = (next.lastHitMpTurn ?? -1) >= guardSeq;
-      const alreadyRewarded = (next.guardNoHitRewardedSeq ?? -1) === guardSeq;
+      const curHero = (heroPatch !== hList ? heroPatch : hList).find((h) => h.id === id) ?? next;
+      const hasHitMpThisGuard = (curHero.lastHitMpTurn ?? -1) >= guardSeq;
+      const alreadyRewarded = (curHero.guardNoHitRewardedSeq ?? -1) === guardSeq;
       if (!hasHitMpThisGuard && !alreadyRewarded) {
-        const updated = hList.map((h) =>
-          h.id === next.id
+        const base = heroPatch !== hList ? heroPatch : hList;
+        const updated = base.map((h) =>
+          h.id === id
             ? {
                 ...h,
                 curMp: Math.min(MP_MAX, h.curMp + GUARD_NO_HIT_MP_GAIN),
@@ -151,14 +216,15 @@ export default function App() {
             : h
         );
         setHeroes(updated);
-        // 重新計算 alive/sorted 會變動較大，這裡只更新 activeUnit 對應物件的 MP（視覺上立即反映即可）
-        const patchedNext = updated.find((h) => h.id === next.id) ?? next;
+        const patchedNext = updated.find((h) => h.id === id) ?? next;
         setActiveUnit(patchedNext);
       } else {
-        setActiveUnit(next);
+        setActiveUnit((heroPatch !== hList ? heroPatch : hList).find((h) => h.id === id) ?? next);
       }
     } else {
-      setActiveUnit(next);
+      setActiveUnit(
+        next?.isHero ? (heroPatch !== hList ? heroPatch : hList).find((h) => h.id === next.id) ?? next : next
+      );
     }
     setTurnQueue(sorted.slice(0, 10));
     setTargetMode(null);
@@ -175,7 +241,8 @@ export default function App() {
   };
 
   const endHeroAction = (baseHeroes, { mpCost = 0, mpGain = 0 } = {}) => {
-    const nextAv = activeUnit.av + 10000 / activeUnit.spd;
+    const spd = getEffectiveSpd(activeUnit);
+    const nextAv = activeUnit.av + 10000 / spd;
     const newH = baseHeroes.map((h) =>
       h.id === activeUnit.id
         ? {
@@ -254,22 +321,29 @@ export default function App() {
     );
 
   const tickMonsterDebuffsOnEndTurn = (mList) =>
-    mList.map((m) =>
-      m.curHp > 0
-        ? {
-            ...m,
-            defDownTurns: Math.max(0, (m.defDownTurns ?? 0) - 1),
-            mdefDownTurns: Math.max(0, (m.mdefDownTurns ?? 0) - 1),
-          }
-        : m
-    );
+    mList.map((m) => {
+      if (m.curHp <= 0) return m;
+      const oldEff = getEffectiveSpd(m);
+      const nextDef = Math.max(0, (m.defDownTurns ?? 0) - 1);
+      const nextMdef = Math.max(0, (m.mdefDownTurns ?? 0) - 1);
+      const nextSpdT = Math.max(0, (m.spdDownTurns ?? 0) - 1);
+      let next = {
+        ...m,
+        defDownTurns: nextDef,
+        mdefDownTurns: nextMdef,
+        spdDownTurns: nextSpdT,
+      };
+      const newEff = getEffectiveSpd(next);
+      const av = rescaleAvForSpdChange(m.av, oldEff, newEff);
+      return { ...next, av };
+    });
 
   const buildUnitEffects = (u) => {
     if (!u) return [];
     const out = [];
 
     if (u.isHero) {
-      if (u.passive?.name) out.push({ kind: 'passive', label: `被動：${u.passive.name}` });
+      if (u.passive?.name) out.push({ kind: 'passive', label: `被動：${u.passive.name}`, passive: u.passive });
       if (u.status === 'guard') out.push({ kind: 'buff', label: '防禦' });
       if ((u.barrierTurns ?? 0) > 0) out.push({ kind: 'buff', label: `護盾×${u.barrierTurns}` });
 
@@ -283,6 +357,10 @@ export default function App() {
         const pct = Math.round((1 - (u.incomingDmgMul ?? 1)) * 100);
         out.push({ kind: 'buff', label: `受傷↓${pct}%` });
       }
+
+      if ((u.regenTurns ?? 0) > 0 && (u.regenHeal ?? 0) > 0) {
+        out.push({ kind: 'buff', label: `緩回×${u.regenTurns}（每回合+${u.regenHeal}）` });
+      }
     } else {
       if ((u.defDownTurns ?? 0) > 0) {
         const mul = u.defDownMul ?? 1;
@@ -294,25 +372,95 @@ export default function App() {
         const pct = Math.round((1 - mul) * 100);
         out.push({ kind: 'debuff', label: `魔防↓${pct}%（${u.mdefDownTurns}）` });
       }
+      if ((u.spdDownTurns ?? 0) > 0) {
+        const mul = u.spdDownMul ?? 1;
+        const pct = Math.round((1 - mul) * 100);
+        out.push({ kind: 'debuff', label: `速度↓${pct}%（${u.spdDownTurns}）` });
+      }
     }
 
     return out;
   };
 
-  const renderEffectChip = (e, idx) => (
-    <span
-      key={`${e.label}-${idx}`}
-      className={`px-2 py-1 rounded-full text-[8px] font-black tracking-wide border ${
-        e.kind === 'debuff'
-          ? 'bg-red-950/40 text-red-200 border-red-500/25'
-          : e.kind === 'passive'
-            ? 'bg-slate-900/60 text-slate-300 border-white/10'
+  const describePassiveMechanics = (passive) => {
+    const e = passive?.effect;
+    if (!e?.type) return null;
+    if (e.type === 'basicAtkMul') return `戰鬥機制：一般攻擊造成的傷害 ×${e.value ?? 1}（與其他倍率相乘）。`;
+    if (e.type === 'turnStartMp') return `戰鬥機制：輪到自己行動時，先獲得 ${e.value ?? 0} MP（上限 100）。`;
+    if (e.type === 'guardIncomingMul') return `戰鬥機制：處於防禦且被敵方攻擊命中時，該次傷害再 ×${e.value ?? 1}。`;
+    if (e.type === 'debuffTurnsPlus') return `戰鬥機制：我方技能對敵人施加的弱化持續回合 +${e.value ?? 0}。`;
+    if (e.type === 'healGivesBarrier') {
+      const pct = Math.round((1 - (e.incomingMul ?? 1)) * 100);
+      return `戰鬥機制：治療隊友成功後，目標獲得護盾（約 ${pct}% 減傷，${e.turns ?? 1} 次）。`;
+    }
+    return `戰鬥機制：效果類型「${e.type}」。`;
+  };
+
+  const renderEffectChip = (e, idx) => {
+    const baseClass = `px-2 py-1 rounded-full text-[8px] font-black tracking-wide border ${
+      e.kind === 'debuff'
+        ? 'bg-red-950/40 text-red-200 border-red-500/25'
+        : e.kind === 'passive'
+          ? 'bg-slate-900/60 text-slate-300 border-white/10'
           : 'bg-emerald-950/35 text-emerald-200 border-emerald-500/20'
-      }`}
-    >
-      {e.label}
-    </span>
-  );
+    }`;
+
+    if (e.kind === 'passive' && e.passive?.name) {
+      return (
+        <span
+          key={`${e.label}-${idx}`}
+          role="button"
+          tabIndex={0}
+          title="長按或右鍵查看詳細"
+          className={`${baseClass} cursor-help select-none touch-manipulation active:scale-[0.98]`}
+          onPointerDown={() => {
+            passiveLongPressFiredRef.current = false;
+            if (passiveLongPressTimerRef.current) clearTimeout(passiveLongPressTimerRef.current);
+            passiveLongPressTimerRef.current = setTimeout(() => {
+              passiveLongPressFiredRef.current = true;
+              setPassiveInfo({
+                name: e.passive.name,
+                description: e.passive.description ?? '',
+                mechanics: describePassiveMechanics(e.passive),
+              });
+            }, 450);
+          }}
+          onPointerUp={() => {
+            if (passiveLongPressTimerRef.current) clearTimeout(passiveLongPressTimerRef.current);
+          }}
+          onPointerCancel={() => {
+            if (passiveLongPressTimerRef.current) clearTimeout(passiveLongPressTimerRef.current);
+          }}
+          onContextMenu={(ev) => {
+            ev.preventDefault();
+            setPassiveInfo({
+              name: e.passive.name,
+              description: e.passive.description ?? '',
+              mechanics: describePassiveMechanics(e.passive),
+            });
+          }}
+          onKeyDown={(ev) => {
+            if (ev.key === 'Enter' || ev.key === ' ') {
+              ev.preventDefault();
+              setPassiveInfo({
+                name: e.passive.name,
+                description: e.passive.description ?? '',
+                mechanics: describePassiveMechanics(e.passive),
+              });
+            }
+          }}
+        >
+          {e.label}
+        </span>
+      );
+    }
+
+    return (
+      <span key={`${e.label}-${idx}`} className={baseClass}>
+        {e.label}
+      </span>
+    );
+  };
 
   const describeSkillEffect = (skill) => {
     const e = skill?.effect;
@@ -338,6 +486,14 @@ export default function App() {
       const pct = Math.round((1 - (e.mul ?? 1)) * 100);
       const dmg = typeof e.damageMul === 'number' ? `，並造成小傷害×${e.damageMul}` : '';
       return `敵方單體雙防降低 ${pct}%（${e.turns ?? 1} 回合）${dmg}`;
+    }
+    if (e.type === 'debuff' && e.stat === 'spd' && e.target === 'enemy-all') {
+      const pct = Math.round((1 - (e.mul ?? 1)) * 100);
+      return `敵方全體速度降低 ${pct}%（${e.turns ?? 1} 回合）`;
+    }
+    if (e.type === 'regen') {
+      const mul = e.powerMul ?? 0.2;
+      return `我方全體緩回（${e.turns ?? 1} 回合，每回合回復量與魔力×${mul} 相關）`;
     }
     return `效果：${e.type}`;
   };
@@ -382,6 +538,69 @@ export default function App() {
     advanceTurn(newH, monsters);
   };
 
+  const castRegenAll = async (skill) => {
+    if (!activeUnit?.isHero) return;
+    const def = getRegenAllDef(skill);
+    if (!def) return;
+    const mpCost = skill?.mpCost ?? 0;
+    if (activeUnit.curMp < mpCost) {
+      setLogs([`MP 不足，無法施放「${skill.name}」（需 ${mpCost}）`, ...logs].slice(0, 5));
+      return;
+    }
+
+    const healPer = resolveRegenHealPerTick(activeUnit, { powerMul: def.powerMul });
+    setIsProcessing(true);
+    const newH0 = heroes.map((h) =>
+      h.curHp > 0 ? { ...h, regenTurns: def.turns, regenHeal: healPer } : h
+    );
+    setHeroes(newH0);
+    setLogs(
+      [
+        `${activeUnit.name} 施放「${skill.name}」：全隊獲得緩回（${def.turns} 回合，每回合行動開始 +${healPer} HP）`,
+        ...logs,
+      ].slice(0, 5)
+    );
+    const newH = endHeroAction(newH0, { mpCost });
+    await new Promise((r) => setTimeout(r, 600));
+    advanceTurn(newH, monsters);
+  };
+
+  const castSlowAllEnemies = async (skill) => {
+    if (!activeUnit?.isHero) return;
+    const def = getSlowAllDef(skill);
+    if (!def) return;
+    const mpCost = skill?.mpCost ?? 0;
+    if (activeUnit.curMp < mpCost) {
+      setLogs([`MP 不足，無法施放「${skill.name}」（需 ${mpCost}）`, ...logs].slice(0, 5));
+      return;
+    }
+
+    const extraTurns = activeUnit?.passive?.effect?.type === 'debuffTurnsPlus' ? (activeUnit.passive.effect.value ?? 0) : 0;
+    const turns = def.turns + extraTurns;
+
+    setIsProcessing(true);
+    const newM = monsters.map((m) => {
+      if (m.curHp <= 0) return m;
+      const oldEff = getEffectiveSpd(m);
+      const next = { ...m, spdDownTurns: turns, spdDownMul: def.mul };
+      const newEff = getEffectiveSpd(next);
+      const av = rescaleAvForSpdChange(m.av, oldEff, newEff);
+      return { ...next, av };
+    });
+    setMonsters(newM);
+    const pct = Math.round((1 - def.mul) * 100);
+    setLogs(
+      [
+        `${activeUnit.name} 施放「${skill.name}」：敵方全體速度降低 ${pct}%（${turns} 回合）`,
+        ...logs,
+      ].slice(0, 5)
+    );
+    const newH = endHeroAction(heroes, { mpCost });
+    await new Promise((r) => setTimeout(r, 600));
+    if (newM.every((m) => m.curHp <= 0)) grantVictory(newM);
+    else advanceTurn(newH, newM);
+  };
+
   const castDamageAllEnemies = async (skill) => {
     if (!activeUnit?.isHero) return;
     const effect = skill?.effect;
@@ -408,7 +627,7 @@ export default function App() {
     setLogs([`${activeUnit.name} 施放「${skill.name}」：全體造成總計 ${total} 傷害`, ...logs].slice(0, 5));
     const newH = endHeroAction(heroes, { mpCost });
     await new Promise((r) => setTimeout(r, 600));
-    if (newM.every((m) => m.curHp <= 0)) setScene('victory');
+    if (newM.every((m) => m.curHp <= 0)) grantVictory(newM);
     else advanceTurn(newH, newM);
   };
 
@@ -526,7 +745,7 @@ export default function App() {
     const newH = endHeroAction(heroes, { mpCost: isSkill ? mpCost : 0, mpGain: atkMpGain });
 
     await new Promise((r) => setTimeout(r, 600));
-    if (newM.every((m) => m.curHp <= 0)) setScene('victory');
+    if (newM.every((m) => m.curHp <= 0)) grantVictory(newM);
     else advanceTurn(newH, newM);
   };
 
@@ -535,7 +754,7 @@ export default function App() {
     setIsProcessing(true);
     const newH = heroes.map((h) =>
       h.id === activeUnit.id
-        ? { ...h, status: 'guard', guardStartTurnSeq: turnSeq, guardNoHitRewardedSeq: -1, av: h.av + 10000 / h.spd }
+        ? { ...h, status: 'guard', guardStartTurnSeq: turnSeq, guardNoHitRewardedSeq: -1, av: h.av + 10000 / getEffectiveSpd(h) }
         : h
     );
     setHeroes(newH);
@@ -576,7 +795,7 @@ export default function App() {
         setHeroes(newH);
         const skillLabel = useSkill ? `施放「${mSkill.name}」` : '撞擊了';
         setLogs([`${activeUnit.name} ${skillLabel} ${target.name}，造成 ${dmg} 傷害`, ...logs].slice(0, 5));
-        const nextAv = activeUnit.av + 10000 / activeUnit.spd;
+        const nextAv = activeUnit.av + 10000 / getEffectiveSpd(activeUnit);
         const newM = monsters.map((m) =>
           m.id === activeUnit.id
             ? {
@@ -599,7 +818,11 @@ export default function App() {
   }, [activeUnit, scene, isProcessing]);
 
   useEffect(() => {
-    if (scene !== 'battle') setShowExitModal(false);
+    if (scene !== 'battle') {
+      setShowExitModal(false);
+      setSkillInfo(null);
+      setPassiveInfo(null);
+    }
   }, [scene]);
 
   const getStatusUnit = () => {
@@ -610,6 +833,26 @@ export default function App() {
 
   const statusUnit = getStatusUnit();
 
+  const performAccountReset = () => {
+    if (resetConfirmInput.trim() !== 'reset') {
+      setResetConfirmError('請完整輸入小寫 reset 以確認');
+      return;
+    }
+    clearPartyStorage();
+    clearHeroXpStorage();
+    setPartyIds(loadPartyIds());
+    setPartyNotice('帳號已重置：隊伍與等級／經驗已還原為預設。');
+    setVictoryXpReport(null);
+    setResetAccountModalOpen(false);
+    setResetConfirmInput('');
+    setResetConfirmError('');
+    setSettingsMenuOpen(false);
+    setShowExitModal(false);
+    if (scene === 'battle' || scene === 'victory' || scene === 'defeat') {
+      setScene('lobby');
+    }
+  };
+
   return (
     <div className="flex flex-col h-screen bg-slate-950 text-slate-100 font-sans overflow-hidden">
       <div className="h-10 bg-slate-900 border-b border-white/10 flex items-center justify-between px-4 shrink-0 z-40">
@@ -619,7 +862,7 @@ export default function App() {
             {scene === 'lobby' ? 'Main Hall' : scene === 'party' ? 'Squad' : 'Battle Zone'}
           </span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {scene === 'battle' ? (
             <button
               type="button"
@@ -635,6 +878,41 @@ export default function App() {
               <Zap size={10} className="text-yellow-400" /> 120
             </div>
           )}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setSettingsMenuOpen((o) => !o)}
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-slate-800/80 text-slate-200 hover:bg-slate-700 hover:text-white active:scale-95 transition-all"
+              aria-label="選項"
+              title="選項"
+            >
+              <Settings size={18} strokeWidth={2.25} />
+            </button>
+            {settingsMenuOpen ? (
+              <>
+                <button
+                  type="button"
+                  className="fixed inset-0 z-[115] cursor-default bg-transparent"
+                  aria-label="關閉選單"
+                  onClick={() => setSettingsMenuOpen(false)}
+                />
+                <div className="fixed right-3 top-11 z-[120] w-44 overflow-hidden rounded-xl border border-white/15 bg-slate-900 py-1 shadow-2xl ring-1 ring-black/40">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSettingsMenuOpen(false);
+                      setResetConfirmInput('');
+                      setResetConfirmError('');
+                      setResetAccountModalOpen(true);
+                    }}
+                    className="w-full px-3 py-2.5 text-left text-[11px] font-bold text-red-200 hover:bg-red-950/50 transition-colors"
+                  >
+                    重置帳號…
+                  </button>
+                </div>
+              </>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -652,14 +930,14 @@ export default function App() {
             <div className="w-full max-w-xs space-y-4">
               <button
                 type="button"
-                onClick={startBattle}
+                onClick={() => setScene('stage')}
                 className="w-full group bg-red-600 hover:bg-red-500 p-4 rounded-2xl flex items-center justify-between shadow-xl transition-all active:scale-95"
               >
                 <div className="flex items-center gap-3">
                   <Sword className="text-white" />
                   <div className="text-left">
-                    <p className="text-xs font-black italic">進入戰鬥</p>
-                    <p className="text-[10px] text-white/60">第一章：史萊姆棲息地</p>
+                    <p className="text-xs font-black italic">冒險</p>
+                    <p className="text-[10px] text-white/60">選擇關卡後出發</p>
                   </div>
                 </div>
                 <Play size={20} fill="currentColor" />
@@ -723,7 +1001,10 @@ export default function App() {
               {partyNotice ? <p className="text-[10px] text-amber-400 mt-2 font-bold">{partyNotice}</p> : null}
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 py-3 space-y-2 pb-6">
-              {HEROES_BASE.map((hero) => {
+              {(() => {
+                const partyXpMap = loadHeroXpMap();
+                return HEROES_BASE.map((hero) => {
+                const prog = partyXpMap[hero.id] ?? defaultProgress();
                 const on = partyIds.includes(hero.id);
                 const isCaptain = on && partyIds[0] === hero.id;
                 const cantLeave = on && partyIds.length <= MIN_PARTY;
@@ -745,6 +1026,9 @@ export default function App() {
                       <HeroAvatar src={hero.avatar} name={hero.name} accentClassName={hero.color} size="lg" />
                       <div className="min-w-0 flex-1">
                         <p className={`text-xs font-black truncate ${on ? 'text-blue-100' : 'text-slate-200'}`}>{hero.name}</p>
+                        <p className="text-[8px] font-bold text-violet-300/90 mt-0.5">
+                          Lv.{prog.level} · EXP {prog.xp}/{xpRequiredForNextLevel(prog.level)}
+                        </p>
                         {hero.title ? (
                           <p className="text-[9px] text-slate-500 mt-0.5 tracking-wide">「{hero.title}」</p>
                         ) : null}
@@ -793,7 +1077,73 @@ export default function App() {
                     </div>
                   </div>
                 );
+              });
+              })()}
+            </div>
+          </div>
+        )}
+
+        {scene === 'stage' && (
+          <div className="flex-1 flex flex-col min-h-0 bg-[radial-gradient(circle_at_top,_#1e293b_0%,_#020617_70%)]">
+            <div className="shrink-0 px-4 pt-3 pb-2 border-b border-white/10">
+              <button
+                type="button"
+                onClick={() => setScene('lobby')}
+                className="flex items-center gap-1 text-[10px] font-bold text-slate-400 hover:text-white mb-2"
+              >
+                <ChevronLeft size={14} />
+                返回大廳
+              </button>
+              <h2 className="text-lg font-black italic text-white tracking-tight">關卡選擇</h2>
+              <p className="text-[10px] text-slate-500 mt-0.5">選擇要挑戰的關卡，並確認隊伍已上陣。</p>
+            </div>
+
+            <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 py-3 space-y-2 pb-6">
+              {STAGES.map((st) => {
+                const active = selectedStageId === st.id;
+                const xpSum = sumMonstersXpReward(st.monsters ?? []);
+                return (
+                  <button
+                    key={st.id}
+                    type="button"
+                    onClick={() => setSelectedStageId(st.id)}
+                    className={`w-full text-left rounded-2xl border p-4 transition-all active:scale-[0.99] ${
+                      active
+                        ? 'border-blue-500/50 bg-blue-600/15 ring-1 ring-blue-500/20'
+                        : 'border-white/10 bg-slate-900/40 hover:bg-slate-900/55'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-black italic text-white leading-tight">{st.title}</p>
+                        <p className="text-[9px] text-slate-500 mt-1">{st.subtitle}</p>
+                        <p className="text-[9px] text-slate-400 mt-2 leading-snug">
+                          敵人：{(st.monsters ?? []).map((m) => m.name).join(' + ') || '—'}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="text-[9px] font-black text-violet-300/90">EXP 合計</p>
+                        <p className="text-sm font-black text-violet-200 tabular-nums">{xpSum}</p>
+                      </div>
+                    </div>
+                  </button>
+                );
               })}
+
+              <button
+                type="button"
+                onClick={() => startBattle(selectedStageId)}
+                className="w-full mt-2 group bg-red-600 hover:bg-red-500 p-4 rounded-2xl flex items-center justify-between shadow-xl transition-all active:scale-95"
+              >
+                <div className="flex items-center gap-3">
+                  <Sword className="text-white" />
+                  <div className="text-left">
+                    <p className="text-xs font-black italic">出發</p>
+                    <p className="text-[10px] text-white/60">{STAGES.find((s) => s.id === selectedStageId)?.title ?? '—'}</p>
+                  </div>
+                </div>
+                <Play size={20} fill="currentColor" />
+              </button>
             </div>
           </div>
         )}
@@ -834,7 +1184,7 @@ export default function App() {
               ))}
             </div>
 
-            <div className="flex justify-center items-end gap-3 py-5 shrink-0 h-32">
+            <div className="flex justify-center items-end gap-3 py-4 shrink-0 min-h-[8.5rem]">
               {monsters.map((m) => (
                 <div
                   key={m.id}
@@ -879,6 +1229,9 @@ export default function App() {
                       </>
                     )}
                   </div>
+                  <span className="max-w-[4.5rem] text-center text-[8px] font-bold text-slate-200 leading-tight line-clamp-2 break-words px-0.5">
+                    {m.name}
+                  </span>
                   <div className="w-12 bg-slate-800 h-1.5 rounded-full overflow-hidden">
                     <div className="h-full bg-red-500" style={{ width: `${(m.curHp / m.hp) * 100}%` }} />
                   </div>
@@ -989,10 +1342,18 @@ export default function App() {
                                     castBuffAtkAll(s);
                                     return;
                                   }
+                                  if (s?.effect?.type === 'regen') {
+                                    castRegenAll(s);
+                                    return;
+                                  }
                                 }
                                 if (!t.requiresTarget && t.side === 'enemy' && t.mode === 'all') {
                                   if (s?.effect?.type === 'damage') {
                                     castDamageAllEnemies(s);
+                                    return;
+                                  }
+                                  if (s?.effect?.type === 'debuff' && s?.effect?.stat === 'spd') {
+                                    castSlowAllEnemies(s);
                                     return;
                                   }
                                 }
@@ -1126,9 +1487,20 @@ export default function App() {
                   <div className="w-full bg-slate-800 h-0.5 rounded-full overflow-hidden">
                     <div className="h-full bg-cyan-400" style={{ width: `${h.curMp}%` }} />
                   </div>
+                  <div className="mt-0.5 w-full bg-slate-800 h-0.5 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-violet-500"
+                      style={{
+                        width: `${Math.min(100, ((h.heroXp ?? 0) / Math.max(1, h.heroXpToNext ?? 1)) * 100)}%`,
+                      }}
+                    />
+                  </div>
                   <div className="mt-0.5 w-full text-center text-[8px] font-black text-slate-500 tabular-nums leading-tight">
                     <div>HP {h.curHp}/{h.hp}</div>
                     <div>MP {h.curMp}/100</div>
+                    <div className="text-violet-300/90">
+                      Lv.{h.heroLevel ?? 1} · EXP {h.heroXp ?? 0}/{h.heroXpToNext ?? '—'}
+                    </div>
                   </div>
                   <span className="text-[9px] font-bold mt-1 w-full text-center text-slate-100 leading-tight line-clamp-2 break-words hyphens-none px-0.5">
                     {h.name}
@@ -1142,13 +1514,84 @@ export default function App() {
         {(scene === 'victory' || scene === 'defeat') && (
           <div className="flex-1 flex flex-col items-center justify-center p-10 bg-slate-950 text-center">
             <h2 className="text-5xl font-black italic mb-4 tracking-tighter">{scene === 'victory' ? 'VICTORY' : 'DEFEAT'}</h2>
+            {scene === 'victory' && victoryXpReport?.length ? (
+              <div className="w-full max-w-sm mb-6 rounded-2xl border border-violet-500/25 bg-violet-950/30 px-4 py-3 text-left">
+                <p className="text-[9px] font-black uppercase tracking-widest text-violet-300/90 mb-2">
+                  戰鬥經驗（本戰合計 {sumMonstersXpReward(monsters)} EXP，平分予上陣成員）
+                </p>
+                <ul className="space-y-1.5 text-[11px] font-bold text-slate-200 leading-snug">
+                  {victoryXpReport.map((row) => (
+                    <li key={row.id}>
+                      {row.name} 獲得 <span className="text-violet-200">{row.amount}</span> EXP
+                      {row.levelUpCount > 0 ? (
+                        <span className="text-amber-300">
+                          {' '}
+                          · 升級 ×{row.levelUpCount}（Lv.{row.newLevel}）
+                        </span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             <button
               type="button"
-              onClick={() => setScene('lobby')}
+              onClick={() => {
+                setVictoryXpReport(null);
+                setScene('lobby');
+              }}
               className="px-10 py-3 bg-blue-600 rounded-full font-bold flex items-center gap-2"
             >
               <RotateCcw size={18} /> 返回主廳
             </button>
+          </div>
+        )}
+
+        {resetAccountModalOpen && (
+          <div className="fixed inset-0 z-[118] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6">
+            <div className="w-full max-w-sm bg-slate-900 border-2 border-red-500/30 rounded-3xl p-6 shadow-2xl animate-in fade-in zoom-in duration-200">
+              <div className="flex justify-center mb-3 text-red-500">
+                <AlertTriangle size={40} />
+              </div>
+              <h3 className="text-lg font-black italic text-center mb-2 text-white">重置帳號</h3>
+              <p className="text-[11px] text-slate-400 text-center mb-4 leading-relaxed">
+                將清除本機儲存的<strong className="text-slate-300"> 隊伍編成 </strong>與<strong className="text-slate-300"> 等級／經驗值 </strong>
+                ，無法復原。若確定要繼續，請在下方輸入 <span className="font-mono font-black text-amber-300">reset</span>（全小寫）。
+              </p>
+              <label className="block text-[9px] font-black uppercase tracking-wide text-slate-500 mb-1.5">確認文字</label>
+              <input
+                type="text"
+                autoComplete="off"
+                value={resetConfirmInput}
+                onChange={(e) => {
+                  setResetConfirmInput(e.target.value);
+                  setResetConfirmError('');
+                }}
+                placeholder="reset"
+                className="w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2.5 text-sm font-mono text-white placeholder:text-slate-600 focus:border-amber-500/50 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+              />
+              {resetConfirmError ? <p className="mt-2 text-[10px] font-bold text-red-400">{resetConfirmError}</p> : null}
+              <div className="mt-5 flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={performAccountReset}
+                  className="w-full py-3 bg-red-600 hover:bg-red-500 rounded-xl font-black text-sm transition-colors"
+                >
+                  確認重置
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setResetAccountModalOpen(false);
+                    setResetConfirmInput('');
+                    setResetConfirmError('');
+                  }}
+                  className="w-full py-3 bg-white/5 hover:bg-white/10 rounded-xl font-bold text-sm text-slate-300 transition-colors"
+                >
+                  取消
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -1228,6 +1671,51 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {passiveInfo && (
+          <div className="absolute inset-0 z-[110] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6">
+            <div className="w-full max-w-sm bg-slate-900 border-2 border-white/10 rounded-3xl p-5 shadow-2xl animate-in fade-in zoom-in duration-200">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Passive</p>
+                  <h3 className="text-lg font-black italic text-white leading-tight">{passiveInfo.name}</h3>
+                  <p className="text-[9px] font-bold text-slate-500 mt-1">被動技能（常駐）</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPassiveInfo(null)}
+                  className="h-9 w-9 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center shrink-0"
+                  aria-label="關閉"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="mt-4 space-y-2">
+                <div className="rounded-2xl border border-white/10 bg-black/30 p-3">
+                  <p className="text-[9px] font-black text-slate-400">說明</p>
+                  <p className="text-[11px] font-bold text-slate-200 leading-snug">{passiveInfo.description || '（無說明）'}</p>
+                </div>
+                {passiveInfo.mechanics ? (
+                  <div className="rounded-2xl border border-slate-600/30 bg-slate-950/50 p-3">
+                    <p className="text-[9px] font-black text-slate-400">詳細效果</p>
+                    <p className="text-[11px] font-bold text-slate-300 leading-snug mt-1">{passiveInfo.mechanics}</p>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="mt-4 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setPassiveInfo(null)}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl font-black text-sm"
+                >
+                  知道了
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {scene !== 'battle' && (
@@ -1243,7 +1731,7 @@ export default function App() {
             label="冒險"
             active={scene === 'battle'}
             onClick={() => {
-              if (scene === 'lobby' || scene === 'party') startBattle();
+              if (scene === 'lobby' || scene === 'party' || scene === 'stage') setScene('stage');
             }}
           />
           <NavBtn icon={<Users />} label="隊伍" active={scene === 'party'} onClick={() => setScene('party')} />
