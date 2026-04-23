@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Frost Wind Sprite">
+  <defs>
+    <linearGradient id="wind" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#a5f3fc"/>
+      <stop offset="100%" stop-color="#22d3ee"/>
+    </linearGradient>
+  </defs>
+  <circle cx="32" cy="32" r="28" fill="url(#wind)"/>
+  <path d="M12 34c10-2 14 6 22 4s12-8 20-6M14 44c8 4 14-4 22-2s14 10 22 6M16 24c10 2 12-8 20-6s12 10 20 8"
+        fill="none" stroke="#0e7490" stroke-width="3" stroke-linecap="round" opacity="0.4"/>
+  <circle cx="26" cy="30" r="4" fill="#ecfeff" opacity="0.95"/>
+  <circle cx="38" cy="30" r="4" fill="#ecfeff" opacity="0.95"/>
+  <circle cx="26" cy="30" r="1.6" fill="#164e63" opacity="0.75"/>
+  <circle cx="38" cy="30" r="1.6" fill="#164e63" opacity="0.75"/>
+</svg>
