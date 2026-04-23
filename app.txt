@@ -1,0 +1,342 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { 
+  Heart, Zap, Sword, Shield, User, 
+  RotateCcw, Play, Flame, Droplets, 
+  Wind, Sun, Moon, Backpack, Sparkles, 
+  ShieldAlert, Target, Home, MessageSquare, Users, Crosshair, AlertTriangle, X
+} from 'lucide-react';
+
+// --- 初始數據設定 ---
+const HEROES_BASE = [
+  { id: 'h1', name: '普爾斯', type: 'fire', color: 'text-red-500', hp: 520, mp: 100, atk: 120, matk: 110, def: 80, spd: 105, title: '燎原之刃' },
+  { id: 'h2', name: '熊吉', type: 'wind', color: 'text-emerald-500', hp: 600, mp: 100, atk: 90, matk: 40, def: 100, spd: 115, title: '疾風旅者' },
+  { id: 'h3', name: '白澤', type: 'water', color: 'text-blue-500', hp: 850, mp: 100, atk: 80, matk: 30, def: 150, spd: 90, title: '不動之盾' },
+  { id: 'h4', name: '布提婭', type: 'dark', color: 'text-purple-500', hp: 400, mp: 100, atk: 45, matk: 160, def: 60, spd: 98, title: '淵星術士' },
+  { id: 'h5', name: '布布', type: 'light', color: 'text-yellow-400', hp: 450, mp: 100, atk: 30, matk: 140, def: 70, spd: 102, title: '破曉司祭' },
+];
+
+const MONSTERS_BASE = [
+  { id: 'm1', name: '火', type: 'fire', hp: 400, atk: 60, def: 40, spd: 90 },
+  { id: 'm2', name: '風', type: 'wind', hp: 350, atk: 50, def: 30, spd: 120 },
+  { id: 'm3', name: '水', type: 'water', hp: 500, atk: 40, def: 100, spd: 85 },
+  { id: 'm4', name: '暗', type: 'dark', hp: 450, atk: 70, def: 50, spd: 95 },
+  { id: 'm5', name: '光', type: 'light', hp: 420, atk: 30, def: 60, spd: 100 },
+];
+
+const App = () => {
+  const [scene, setScene] = useState('lobby'); // lobby, battle, victory, defeat
+  const [heroes, setHeroes] = useState([]);
+  const [monsters, setMonsters] = useState([]);
+  const [activeUnit, setActiveUnit] = useState(null);
+  const [turnQueue, setTurnQueue] = useState([]);
+  const [logs, setLogs] = useState(['準備冒險...']);
+  
+  // 狀態機與對話框
+  const [targetMode, setTargetMode] = useState(null); 
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [showExitModal, setShowExitModal] = useState(false);
+
+  // 初始化戰鬥
+  const startBattle = () => {
+    const h = HEROES_BASE.map(u => ({ ...u, curHp: u.hp, curMp: 100, av: 10000/u.spd, isHero: true, status: null }));
+    const m = MONSTERS_BASE.map(u => ({ ...u, curHp: u.hp, av: 10000/u.spd, isHero: false }));
+    setHeroes(h);
+    setMonsters(m);
+    setScene('battle');
+    setLogs(['戰鬥開始！史萊姆出現了。']);
+    calculateNextTurn(h, m);
+  };
+
+  const calculateNextTurn = (hList, mList) => {
+    const alive = [...hList.filter(u => u.curHp > 0), ...mList.filter(u => u.curHp > 0)];
+    if (alive.length === 0) return;
+    const sorted = [...alive].sort((a, b) => a.av - b.av);
+    setActiveUnit(sorted[0]);
+    setTurnQueue(sorted.slice(0, 10));
+    setTargetMode(null);
+    setIsProcessing(false);
+  };
+
+  const getDamage = (atkU, defU, isSkill) => {
+    let base = isSkill ? (atkU.matk || atkU.atk * 1.5) : (atkU.atk);
+    if (atkU.id === 'h1') base = (atkU.atk * 0.7 + atkU.matk * 0.7) * (isSkill ? 1.5 : 1);
+    const mitigation = defU.def / (defU.def + 500);
+    let final = Math.max(1, Math.floor(base * (1 - mitigation) * (0.9 + Math.random() * 0.2)));
+    if (defU.status === 'guard') final = Math.floor(final * 0.5);
+    return final;
+  };
+
+  const onTargetSelect = async (mId) => {
+    if (!targetMode || isProcessing || !activeUnit?.isHero) return;
+    setIsProcessing(true);
+
+    const target = monsters.find(m => m.id === mId);
+    if (!target || target.curHp <= 0) { setIsProcessing(false); return; }
+
+    const isSkill = targetMode === 'skill';
+    const damage = getDamage(activeUnit, target, isSkill);
+    const newM = monsters.map(m => m.id === mId ? { ...m, curHp: Math.max(0, m.curHp - damage) } : m);
+    setMonsters(newM);
+    setLogs([`${activeUnit.name} 對 ${target.name}史萊姆 造成 ${damage} 傷害！`, ...logs].slice(0, 5));
+
+    const nextAv = activeUnit.av + (10000 / activeUnit.spd);
+    const newH = heroes.map(h => h.id === activeUnit.id ? { 
+      ...h, av: nextAv, status: null, curMp: isSkill ? Math.max(0, h.curMp - 20) : h.curMp 
+    } : h);
+    setHeroes(newH);
+
+    await new Promise(r => setTimeout(r, 600));
+    if (newM.every(m => m.curHp <= 0)) setScene('victory');
+    else calculateNextTurn(newH, newM);
+  };
+
+  const onGuard = () => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+    const newH = heroes.map(h => h.id === activeUnit.id ? { ...h, status: 'guard', av: h.av + (10000/h.spd) } : h);
+    setHeroes(newH);
+    setLogs([`${activeUnit.name} 進入防禦狀態`, ...logs].slice(0, 5));
+    setTimeout(() => calculateNextTurn(newH, monsters), 500);
+  };
+
+  useEffect(() => {
+    if (scene === 'battle' && activeUnit && !activeUnit.isHero && !isProcessing) {
+      const monsterAI = async () => {
+        setIsProcessing(true);
+        await new Promise(r => setTimeout(r, 1000));
+        const aliveH = heroes.filter(h => h.curHp > 0);
+        if (aliveH.length === 0) return;
+        const target = aliveH[Math.floor(Math.random() * aliveH.length)];
+        const dmg = getDamage(activeUnit, target, false);
+        const newH = heroes.map(h => h.id === target.id ? { ...h, curHp: Math.max(0, h.curHp - dmg) } : h);
+        setHeroes(newH);
+        setLogs([`${activeUnit.name}史萊姆 撞擊了 ${target.name}，造成 ${dmg} 傷害`, ...logs].slice(0, 5));
+        const nextAv = activeUnit.av + (10000/activeUnit.spd);
+        const newM = monsters.map(m => m.id === activeUnit.id ? { ...m, av: nextAv } : m);
+        setMonsters(newM);
+        if (newH.every(h => h.curHp <= 0)) setScene('defeat');
+        else calculateNextTurn(newH, newM);
+      };
+      monsterAI();
+    }
+  }, [activeUnit, scene, isProcessing]);
+
+  return (
+    <div className="flex flex-col h-screen bg-slate-950 text-slate-100 font-sans overflow-hidden">
+      {/* 頂部導覽列 */}
+      <div className="h-10 bg-slate-900 border-b border-white/10 flex items-center justify-between px-4 shrink-0 z-40">
+        <div className="flex items-center gap-2">
+          <div className="bg-blue-600 text-[10px] px-1.5 py-0.5 rounded font-black italic">AETHELGARD</div>
+          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{scene === 'lobby' ? 'Main Hall' : 'Battle Zone'}</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1 bg-black/40 px-2 py-0.5 rounded-full border border-white/5 text-[10px]">
+            <Zap size={10} className="text-yellow-400" /> 120
+          </div>
+        </div>
+      </div>
+
+      {/* 主要場景區 */}
+      <div className="flex-1 flex flex-col relative overflow-hidden">
+        {scene === 'lobby' && (
+          <div className="flex-1 flex flex-col items-center justify-center p-6 gap-8 bg-[radial-gradient(circle_at_center,_#1e293b_0%,_#020617_100%)]">
+             <div className="animate-pulse mb-4">
+                <Shield size={64} className="text-blue-500/50" />
+             </div>
+             <div className="text-center">
+                <h1 className="text-5xl font-black italic tracking-tighter mb-2 text-white">遺落王權</h1>
+                <p className="text-slate-500 text-[10px] tracking-[0.4em] uppercase">Adventure Awaits</p>
+             </div>
+             
+             {/* 入口區塊 */}
+             <div className="w-full max-w-xs space-y-4">
+                <button onClick={startBattle} className="w-full group bg-red-600 hover:bg-red-500 p-4 rounded-2xl flex items-center justify-between shadow-xl transition-all active:scale-95">
+                   <div className="flex items-center gap-3">
+                      <Sword className="text-white" />
+                      <div className="text-left">
+                         <p className="text-xs font-black italic">進入戰鬥</p>
+                         <p className="text-[10px] text-white/60">第一章：史萊姆棲息地</p>
+                      </div>
+                   </div>
+                   <Play size={20} fill="currentColor" />
+                </button>
+                <div className="w-full bg-slate-900/50 border border-white/5 p-4 rounded-2xl flex items-center gap-3 opacity-50 grayscale">
+                   <Users className="text-slate-500" />
+                   <div className="text-left">
+                      <p className="text-xs font-black italic">隊伍編輯</p>
+                      <p className="text-[10px] text-slate-600">開發中...</p>
+                   </div>
+                </div>
+             </div>
+          </div>
+        )}
+
+        {scene === 'battle' && (
+          <div className="flex-1 flex flex-col p-4 gap-2">
+            {/* 行動序列 */}
+            <div className="flex gap-1 overflow-x-auto no-scrollbar shrink-0 h-8 mt-1">
+               {turnQueue.map((u, i) => (
+                 <div key={`${u.id}-${i}`} className={`w-7 h-7 rounded border flex items-center justify-center shrink-0 transition-all ${i === 0 ? 'ring-2 ring-yellow-400 scale-110' : 'opacity-30'} ${u.isHero ? 'border-blue-500 bg-blue-500/20' : 'border-red-500 bg-red-500/20'}`}>
+                    <span className="text-[8px] font-black uppercase">{u.name[0]}</span>
+                 </div>
+               ))}
+            </div>
+
+            {/* 敵方區域：單排縮小版 */}
+            <div className="flex justify-center items-end gap-3 py-6 shrink-0 h-28">
+               {monsters.map(m => (
+                 <div 
+                   key={m.id} 
+                   onClick={() => targetMode && onTargetSelect(m.id)}
+                   className={`flex flex-col items-center gap-1 transition-all ${m.curHp <= 0 ? 'opacity-20 scale-75 grayscale' : 'active:scale-90 cursor-pointer'}`}
+                 >
+                    <div className={`w-12 h-12 rounded-full bg-slate-900 border-2 flex items-center justify-center transition-all ${targetMode && m.curHp > 0 ? 'border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)] animate-pulse' : 'border-white/10'}`}>
+                      {m.type === 'fire' && <Flame className="text-red-400" size={24}/>}
+                      {m.type === 'water' && <Droplets className="text-blue-400" size={24}/>}
+                      {m.type === 'wind' && <Wind className="text-emerald-400" size={24}/>}
+                      {m.type === 'dark' && <Moon className="text-purple-400" size={24}/>}
+                      {m.type === 'light' && <Sun className="text-yellow-300" size={24}/>}
+                    </div>
+                    <div className="w-10 bg-slate-800 h-1 rounded-full overflow-hidden">
+                       <div className="h-full bg-red-500" style={{ width: `${(m.curHp/m.hp)*100}%` }} />
+                    </div>
+                 </div>
+               ))}
+            </div>
+
+            {/* 日誌區域 */}
+            <div className="bg-black/50 border border-white/5 rounded-xl p-2 h-20 overflow-y-auto no-scrollbar font-mono shrink-0">
+               {logs.map((l, i) => (
+                 <div key={i} className={`text-[9px] mb-0.5 leading-tight ${i === 0 ? 'text-yellow-400' : 'text-slate-500'}`}>
+                    {i === 0 ? '▶ ' : ''}{l}
+                 </div>
+               ))}
+            </div>
+
+            {/* 指令區 */}
+            <div className="flex-1 flex flex-col justify-end pb-3">
+               {activeUnit?.isHero && !isProcessing && (
+                 <div className="flex flex-col gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300 px-1">
+                    {!targetMode ? (
+                      <div className="grid grid-cols-4 gap-2">
+                         <CmdBtn icon={<Sword size={20}/>} label="攻擊" color="bg-red-600" onClick={() => setTargetMode('attack')} />
+                         <CmdBtn icon={<ShieldAlert size={20}/>} label="防禦" color="bg-blue-600" onClick={onGuard} />
+                         <CmdBtn icon={<Sparkles size={20}/>} label="技能" color="bg-purple-600" onClick={() => setTargetMode('skill')} />
+                         <CmdBtn icon={<Backpack size={20}/>} label="道具" color="bg-slate-700" onClick={() => {}} />
+                      </div>
+                    ) : (
+                      <div className="bg-blue-600/20 border border-blue-500/50 p-3 rounded-2xl flex items-center justify-between shadow-lg ring-1 ring-blue-500/30">
+                         <div className="flex items-center gap-3">
+                            <Crosshair size={22} className="text-blue-400 animate-pulse"/>
+                            <div>
+                               <p className="text-[10px] font-black italic text-blue-100 uppercase">Target Selection</p>
+                               <p className="text-[9px] text-blue-300">請點擊上方的史萊姆進行攻擊</p>
+                            </div>
+                         </div>
+                         <button onClick={() => setTargetMode(null)} className="text-[10px] font-bold px-4 py-1.5 bg-white/10 rounded-full border border-white/10">取消</button>
+                      </div>
+                    )}
+                 </div>
+               )}
+            </div>
+
+            {/* 英雄狀態欄：底部分離防遮擋 */}
+            <div className="grid grid-cols-5 gap-1.5 pt-3 border-t border-white/5 shrink-0 pb-6 mb-2">
+               {heroes.map(h => (
+                 <div key={h.id} className={`flex flex-col items-center p-1.5 rounded-xl border transition-all ${activeUnit?.id === h.id ? 'bg-blue-600/30 border-blue-400 scale-105 shadow-lg' : 'bg-slate-900/50 border-white/5'} ${h.curHp <= 0 ? 'opacity-20 grayscale' : ''}`}>
+                    <div className="relative mb-1">
+                       <User size={18} className={h.color}/>
+                       {h.status === 'guard' && <Shield size={10} className="absolute -top-1.5 -right-1.5 text-blue-400 animate-pulse"/>}
+                    </div>
+                    <div className="w-full bg-slate-800 h-1 rounded-full overflow-hidden mb-0.5">
+                       <div className="h-full bg-blue-500" style={{ width: `${(h.curHp/h.hp)*100}%` }} />
+                    </div>
+                    <div className="w-full bg-slate-800 h-0.5 rounded-full overflow-hidden">
+                       <div className="h-full bg-cyan-400" style={{ width: `${h.curMp}%` }} />
+                    </div>
+                    <span className="text-[8px] font-black mt-1.5 truncate w-full text-center uppercase tracking-tighter">{h.name}</span>
+                 </div>
+               ))}
+            </div>
+          </div>
+        )}
+
+        {/* 勝利/失敗介面 */}
+        {(scene === 'victory' || scene === 'defeat') && (
+          <div className="flex-1 flex flex-col items-center justify-center p-10 bg-slate-950 text-center">
+            <h2 className="text-5xl font-black italic mb-4 tracking-tighter">{scene === 'victory' ? 'VICTORY' : 'DEFEAT'}</h2>
+            <button onClick={() => setScene('lobby')} className="px-10 py-3 bg-blue-600 rounded-full font-bold flex items-center gap-2">
+              <RotateCcw size={18} /> 返回主廳
+            </button>
+          </div>
+        )}
+
+        {/* 撤退確認彈窗 (Custom Modal) */}
+        {showExitModal && (
+          <div className="absolute inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6">
+             <div className="w-full max-w-xs bg-slate-900 border-2 border-white/10 rounded-3xl p-6 shadow-2xl animate-in fade-in zoom-in duration-200">
+                <div className="flex justify-center mb-4 text-red-500">
+                   <AlertTriangle size={48} />
+                </div>
+                <h3 className="text-xl font-black italic text-center mb-2">確認撤退？</h3>
+                <p className="text-xs text-slate-400 text-center mb-6 leading-relaxed">
+                   離開戰鬥將會失去目前所有的進度，<br />你確定要返回主廳嗎？
+                </p>
+                <div className="flex flex-col gap-2">
+                   <button 
+                     onClick={() => { setScene('lobby'); setShowExitModal(false); }}
+                     className="w-full py-3 bg-red-600 hover:bg-red-500 rounded-xl font-bold text-sm transition-colors"
+                   >
+                     確認離開
+                   </button>
+                   <button 
+                     onClick={() => setShowExitModal(false)}
+                     className="w-full py-3 bg-white/5 hover:bg-white/10 rounded-xl font-bold text-sm text-slate-300 transition-colors"
+                   >
+                     繼續戰鬥
+                   </button>
+                </div>
+             </div>
+          </div>
+        )}
+      </div>
+
+      {/* 底部導覽欄 */}
+      <div className="h-16 bg-slate-950 border-t border-white/10 flex items-center justify-around px-4 shrink-0 z-50">
+        <NavBtn icon={<Home />} label="主頁" active={scene === 'lobby'} onClick={() => {
+          if (scene === 'battle') setShowExitModal(true);
+          else setScene('lobby');
+        }} />
+        <NavBtn icon={<Sword />} label="冒險" active={scene === 'battle'} onClick={() => {
+          if (scene === 'lobby') startBattle();
+        }} />
+        <NavBtn icon={<Users />} label="隊伍" />
+        <NavBtn icon={<MessageSquare />} label="劇情" />
+        <NavBtn icon={<Shield />} label="召喚" />
+      </div>
+
+      <style>{`
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        @keyframes action-in { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .animate-in { animation: action-in 0.3s ease-out forwards; }
+      `}</style>
+    </div>
+  );
+};
+
+const CmdBtn = ({ icon, label, color, onClick }) => (
+  <button onClick={onClick} className={`${color} flex flex-col items-center justify-center py-3 rounded-2xl shadow-lg active:scale-95 transition-transform`}>
+    {icon}
+    <span className="text-[10px] font-black mt-1.5 uppercase tracking-tighter">{label}</span>
+  </button>
+);
+
+const NavBtn = ({ icon, label, active, onClick }) => (
+  <button onClick={onClick} className={`flex flex-col items-center gap-1 transition-all ${active ? 'text-blue-400 scale-110 font-bold' : 'text-slate-700 hover:text-slate-400'}`}>
+    {React.cloneElement(icon, { size: 18 })}
+    <span className="text-[9px] uppercase tracking-tighter font-black">{label}</span>
+  </button>
+);
+
+export default App;
