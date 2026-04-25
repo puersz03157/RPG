@@ -6,8 +6,11 @@ const STORAGE_KEY = 'aethelgard-hero-xp';
 export const XP_NEXT_BASE = 42;
 export const XP_NEXT_SLOPE = 18;
 
+/** 目前預設等級上限；未來可用「突破素材」提高到 60/70/80... */
+export const DEFAULT_LEVEL_CAP = 50;
+
 export function defaultProgress() {
-  return { level: 1, xp: 0 };
+  return { level: 1, xp: 0, cap: DEFAULT_LEVEL_CAP };
 }
 
 export function xpRequiredForNextLevel(level) {
@@ -32,10 +35,11 @@ export function loadHeroXpMap() {
     for (const id of ids) {
       const p = parsed[id];
       if (!p || typeof p !== 'object') continue;
-      const level = Math.max(1, Math.min(999, Math.floor(Number(p.level)) || 1));
+      const cap = Math.max(1, Math.min(999, Math.floor(Number(p.cap)) || DEFAULT_LEVEL_CAP));
+      const level = Math.max(1, Math.min(cap, Math.floor(Number(p.level)) || 1));
       const need = xpRequiredForNextLevel(level);
-      const xp = Math.max(0, Math.min(need - 1, Math.floor(Number(p.xp)) || 0));
-      out[id] = { level, xp };
+      const xp = level >= cap ? 0 : Math.max(0, Math.min(need - 1, Math.floor(Number(p.xp)) || 0));
+      out[id] = { level, xp, cap };
     }
     return out;
   } catch {
@@ -50,7 +54,9 @@ export function saveHeroXpMap(map) {
     const slim = {};
     for (const id of ids) {
       const p = map[id] ?? defaultProgress();
-      slim[id] = { level: p.level, xp: p.xp };
+      const cap = Math.max(1, Math.min(999, Math.floor(Number(p.cap)) || DEFAULT_LEVEL_CAP));
+      const level = Math.max(1, Math.min(cap, Math.floor(Number(p.level)) || 1));
+      slim[id] = { level, xp: Math.max(0, Math.floor(Number(p.xp)) || 0), cap };
     }
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(slim));
   } catch {
@@ -72,27 +78,32 @@ const STAT_PER_LEVEL_RATE = 0.025;
 
 export function applyLevelLinearStatsToHero(heroBase, progress) {
   const level = progress?.level ?? 1;
+  const cap = progress?.cap ?? DEFAULT_LEVEL_CAP;
   const L = Math.max(0, level - 1);
   const k = 1 + STAT_PER_LEVEL_RATE * L;
   return {
     ...heroBase,
     heroLevel: level,
     heroXp: progress?.xp ?? 0,
-    heroXpToNext: xpRequiredForNextLevel(level),
+    heroLevelCap: cap,
+    heroXpToNext: level >= cap ? 'MAX' : xpRequiredForNextLevel(level),
     hp: Math.max(1, Math.round(heroBase.hp * k)),
     atk: Math.max(1, Math.round(heroBase.atk * k)),
     matk: Math.max(1, Math.round((heroBase.matk ?? 0) * k)),
     def: Math.max(1, Math.round(heroBase.def * k)),
+    mdef: Math.max(1, Math.round((heroBase.mdef ?? heroBase.def) * k)),
     spd: Math.max(1, Math.round(heroBase.spd * k)),
   };
 }
 
 export function applyXpWithLevelUps(progress, addXp) {
   let level = Math.max(1, progress.level ?? 1);
+  const cap = Math.max(1, Math.min(999, Math.floor(Number(progress.cap)) || DEFAULT_LEVEL_CAP));
   let xp = Math.max(0, progress.xp ?? 0);
   let remaining = Math.max(0, Math.floor(addXp));
   let levelUpCount = 0;
-  while (remaining > 0) {
+  if (level >= cap) return { level: cap, xp: 0, cap, levelUpCount: 0 };
+  while (remaining > 0 && level < cap) {
     const need = xpRequiredForNextLevel(level);
     const space = need - xp;
     if (remaining >= space) {
@@ -105,7 +116,8 @@ export function applyXpWithLevelUps(progress, addXp) {
       remaining = 0;
     }
   }
-  return { level, xp, levelUpCount };
+  if (level >= cap) return { level: cap, xp: 0, cap, levelUpCount };
+  return { level, xp, cap, levelUpCount };
 }
 
 /** 總經驗平分給上陣成員，餘數依序 +1 */
@@ -133,11 +145,22 @@ export function awardPartyXp(partyIds, totalBattleXp) {
   for (const { id, amount } of slices) {
     if (amount <= 0) continue;
     const prev = map[id] ?? defaultProgress();
-    const { level, xp, levelUpCount } = applyXpWithLevelUps(prev, amount);
-    map = { ...map, [id]: { level, xp } };
+    const { level, xp, cap, levelUpCount } = applyXpWithLevelUps(prev, amount);
+    map = { ...map, [id]: { level, xp, cap } };
     const name = HEROES_BASE.find((h) => h.id === id)?.name ?? id;
     lines.push({ id, name, amount, levelUpCount, newLevel: level });
   }
   saveHeroXpMap(map);
   return { map, lines };
+}
+
+export function applyManualLevelUps(progress, deltaLevels, maxLevel) {
+  const curLevel = Math.max(1, Math.floor(Number(progress?.level)) || 1);
+  const cap = Math.max(1, Math.min(999, Math.floor(Number(progress?.cap)) || DEFAULT_LEVEL_CAP));
+  const hardMax = Math.max(1, Math.min(999, Math.floor(Number(maxLevel)) || 1));
+  const limit = Math.min(cap, hardMax);
+  const add = Math.max(0, Math.floor(Number(deltaLevels)) || 0);
+  if (curLevel >= limit) return { level: curLevel, xp: 0, cap, gained: 0, limit };
+  const nextLevel = Math.min(limit, curLevel + add);
+  return { level: nextLevel, xp: 0, cap, gained: nextLevel - curLevel, limit };
 }

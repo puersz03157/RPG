@@ -6,9 +6,10 @@ const sizeClass = {
   sm: 'h-6 w-6',
   md: 'h-10 w-10',
   lg: 'h-12 w-12',
+  xl: 'h-28 w-28',
 };
 
-const iconSize = { xs: 14, sm: 12, md: 16, lg: 20 };
+const iconSize = { xs: 14, sm: 12, md: 16, lg: 20, xl: 28 };
 
 export default function HeroAvatar({ src, name, accentClassName = 'text-slate-300', size = 'md', className = '' }) {
   const [failed, setFailed] = useState(false);

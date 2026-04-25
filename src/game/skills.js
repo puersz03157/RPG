@@ -1,21 +1,32 @@
+import { getFreezeSpdMul, getIncomingHealMulFromPoison } from './ailments.js';
+
 export function getSkillTargeting(skill) {
   const effect = skill?.effect;
   if (!effect) return { requiresTarget: true, side: 'enemy', mode: 'single' };
 
+  if (effect.type === 'observeCheer') return { requiresTarget: false, side: 'ally', mode: 'all' };
+  if (effect.type === 'jackPhantomDrawAll') return { requiresTarget: false, side: 'ally', mode: 'all' };
+  if (effect.type === 'cleanseOne' && effect.target === 'ally-all') return { requiresTarget: false, side: 'ally', mode: 'all' };
   if (effect.target === 'enemy-all') return { requiresTarget: false, side: 'enemy', mode: 'all' };
   if (effect.target === 'ally-all') return { requiresTarget: false, side: 'ally', mode: 'all' };
   if (effect.target === 'ally-single') return { requiresTarget: true, side: 'ally', mode: 'single' };
+  if (effect.target === 'self') return { requiresTarget: false, side: 'ally', mode: 'self' };
   return { requiresTarget: true, side: 'enemy', mode: 'single' };
 }
 
-/** 怪物行動條用有效速度（減速 debuff 時低於基礎 spd） */
+/** 行動條用有效速度（英雄：加速 buff；敵：減速 debuff） */
 export function getEffectiveSpd(unit) {
   if (!unit) return 1;
   const base = unit.spd ?? 1;
-  if (unit.isHero) return Math.max(1, base);
+  const freezeMul = getFreezeSpdMul(unit);
+  if (unit.isHero) {
+    const sTurns = unit.spdBuffTurns ?? 0;
+    const sMul = sTurns > 0 ? (typeof unit.spdBuffMul === 'number' ? unit.spdBuffMul : 1) : 1;
+    return Math.max(1, Math.floor(base * sMul * freezeMul));
+  }
   const turns = unit.spdDownTurns ?? 0;
   const mul = turns > 0 ? (typeof unit.spdDownMul === 'number' ? unit.spdDownMul : 1) : 1;
-  return Math.max(1, Math.floor(base * mul));
+  return Math.max(1, Math.floor(base * mul * freezeMul));
 }
 
 /** spd 變動時重算 av，使行動條位置與新速度一致（變慢則 av 變大、變快則 av 變小） */
@@ -55,14 +66,15 @@ export function getSlowAllDef(skill) {
  * 技能結算雛形：先支援 enemy-single 的 damage。
  * 後續要擴充治療/狀態/全體，只要在這裡加 effect.type 分支。
  */
-export function resolveSkillDamage({ caster, target, skill, getDamage }) {
+export function resolveSkillDamage({ caster, target, skill, getDamage, powerMulOverride }) {
   const effect = skill?.effect;
-  if (!effect || effect.type !== 'damage') return { damage: 0 };
+  if (!effect || effect.type !== 'damage') return { damage: 0, crit: false };
 
   const scale = skill?.scale ?? 'matk';
-  const powerMul = effect.powerMul ?? 1;
-  const damage = getDamage(caster, target, true, powerMul, scale);
-  return { damage };
+  const powerMul =
+    typeof powerMulOverride === 'number' ? powerMulOverride : (effect.powerMul ?? 1);
+  const { damage, crit } = getDamage(caster, target, true, powerMul, scale);
+  return { damage, crit };
 }
 
 export function resolveSkillHeal({ caster, target, skill }) {
@@ -74,7 +86,9 @@ export function resolveSkillHeal({ caster, target, skill }) {
 
   // 先做簡單版：治療量以 matk 為主（未來可依 scale 再擴充）
   const base = scale === 'atk' ? caster.atk : scale === 'mix' ? caster.atk * 0.5 + (caster.matk ?? 0) * 0.8 : caster.matk ?? 0;
-  const heal = Math.max(1, Math.floor(base * powerMul * (0.9 + Math.random() * 0.2)));
+  let heal = Math.max(1, Math.floor(base * powerMul * (0.9 + Math.random() * 0.2)));
+  const poisonMul = getIncomingHealMulFromPoison(target);
+  if (poisonMul !== 1) heal = Math.max(1, Math.floor(heal * poisonMul));
   return { heal };
 }
 
@@ -90,11 +104,22 @@ export function getBarrierDef(skill) {
 export function getBuffAllDef(skill) {
   const effect = skill?.effect;
   if (!effect || effect.type !== 'buff' || effect.target !== 'ally-all') return null;
-  if (effect.stat !== 'atk') return null;
-  return {
-    turns: Math.max(1, effect.turns ?? 1),
-    mul: typeof effect.mul === 'number' ? effect.mul : 1,
-  };
+  const turns = Math.max(1, effect.turns ?? 1);
+  const mul = typeof effect.mul === 'number' ? effect.mul : 1;
+  if (effect.stat === 'atk+matk') return { kind: 'atkMatk', turns, mulAtk: mul, mulMatk: mul };
+  if (effect.stat === 'atk') return { kind: 'atk', turns, mulAtk: mul, mulMatk: 1 };
+  if (effect.stat === 'spd') return { kind: 'spd', turns, mulSpd: mul };
+  return null;
+}
+
+/** 我方單體攻／魔 buff（與治療同為 skill-ally 選目標） */
+export function getBuffSingleDef(skill) {
+  const effect = skill?.effect;
+  if (!effect || effect.type !== 'buff' || effect.target !== 'ally-single') return null;
+  if (effect.stat !== 'atk+matk') return null;
+  const turns = Math.max(1, effect.turns ?? 1);
+  const mul = typeof effect.mul === 'number' ? effect.mul : 1;
+  return { turns, mulAtk: mul, mulMatk: mul };
 }
 
 export function getDebuffDef(skill) {
