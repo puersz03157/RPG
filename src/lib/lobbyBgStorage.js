@@ -1,9 +1,9 @@
-import { LOBBY_BACKGROUNDS, DEFAULT_LOBBY_BG_ID } from '../data/lobbyBackgrounds.js';
+import { LOBBY_BACKGROUNDS_PICKABLE, DEFAULT_LOBBY_BG_ID } from '../data/lobbyBackgrounds.js';
 
 const KEY = 'aethelgard-lobby-bg-v1';
 
 function isValidId(id) {
-  return typeof id === 'string' && LOBBY_BACKGROUNDS.some((b) => b.id === id);
+  return typeof id === 'string' && LOBBY_BACKGROUNDS_PICKABLE.some((b) => b.id === id);
 }
 
 export function loadLobbyBgId() {

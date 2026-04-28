@@ -52,6 +52,15 @@ export function saveBondMap(map) {
   }
 }
 
+export function clearBondStorage() {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function getBondPoints(map, a, b) {
   const k = bondKey(a, b);
   if (!k) return 0;

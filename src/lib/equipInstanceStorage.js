@@ -108,6 +108,17 @@ export function saveEquipInstances(list) {
   }
 }
 
+/** 清除實例制裝備背包與各英雄穿戴（v2）；舊版 aethelgard-hero-equip 另由 equipmentStorage.clearHeroEquipStorage 處理 */
+export function clearEquipInstanceStorage() {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem(HERO_EQUIP_V2_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * 一次性遷移：
  * - 舊庫存：aethelgard-equip-inv（count by itemId）→ instances

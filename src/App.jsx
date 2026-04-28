@@ -35,7 +35,7 @@ import {
 import { HEROES_BASE, MONSTERS_BASE, STAGES, CHAPTERS } from './data/units.js';
 import { mapHeroId } from './data/heroIdMap.js';
 import { LOBBY_GREETINGS, LOBBY_DEFAULT_GREETINGS } from './data/lobbyGreetings.js';
-import { LOBBY_BACKGROUNDS, getLobbyBackgroundById } from './data/lobbyBackgrounds.js';
+import { LOBBY_BACKGROUNDS_PICKABLE, getLobbyBackgroundById } from './data/lobbyBackgrounds.js';
 import { loadLobbyBgId, saveLobbyBgId, clearLobbyBgStorage } from './lib/lobbyBgStorage.js';
 import { getInitialLobbyHeroId, saveLobbyHeroId, clearLobbyHeroStorage } from './lib/lobbyHeroStorage.js';
 import { getSkillsForHero } from './data/heroSkills.js';
@@ -73,6 +73,12 @@ import {
   rollStarWishJunkReward,
 } from './data/starWish.js';
 import { loadStarWishState, saveStarWishState, clearStarWishStorage } from './lib/starWishStorage.js';
+import {
+  hasClaimedStarfallWishRefundToday,
+  markStarfallWishRefundClaimed,
+  clearStarfallWishRefundStorage,
+} from './lib/starfallWishRefundStorage.js';
+import { applyLobbyShopBuyGoldPrice, applyLobbyForgeGoldCost } from './lib/lobbyBgBonuses.js';
 import { consumeExpStageRun, getExpStageRunsLeft, refillExpStageRuns, clearExpStageEntryStorage, EXP_STAGE_DAILY_LIMIT } from './lib/expStageEntryStorage.js';
 import { consumeGoldStageRun, getGoldStageRunsLeft, clearGoldStageEntryStorage, GOLD_STAGE_DAILY_LIMIT } from './lib/goldStageEntryStorage.js';
 import { loadMusicSettings, saveMusicSettings, clearMusicStorage } from './lib/musicStorage.js';
@@ -95,10 +101,17 @@ import { loadCompletedStageIds, saveCompletedStageIds, clearStageProgressStorage
 import { loadBossLootClaims, saveBossLootClaims, clearBossLootStorage } from './lib/bossLootStorage.js';
 import { loadTalentMap, saveTalentMap, clearTalentStorage } from './lib/talentStorage.js';
 import { applyEquipmentToHero, getEquipSummary, getEquipStatBonus, clearHeroEquipStorage } from './lib/equipmentStorage.js';
-import { migrateEquipToInstancesIfNeeded, loadHeroEquipMapV2, saveHeroEquipMapV2 } from './lib/equipInstanceStorage.js';
+import {
+  migrateEquipToInstancesIfNeeded,
+  loadHeroEquipMapV2,
+  saveHeroEquipMapV2,
+  loadEquipInstances,
+  clearEquipInstanceStorage,
+} from './lib/equipInstanceStorage.js';
 import { loadSkillMasteryMap, saveSkillMasteryMap, incSkillUses, setSkillMasteryBranch, clearSkillMasteryStorage } from './lib/skillMasteryStorage.js';
 import { getMasteryRank, MASTERY_USES_PER_RANK, getSkillMpDiscountFromMastery, getSkillPowerMulFromMastery } from './game/skillMastery.js';
-import { loadBondMap, saveBondMap, addBondPoints, getBondPoints, getBondLevel } from './lib/bondStorage.js';
+import { loadBondMap, saveBondMap, addBondPoints, getBondPoints, getBondLevel, clearBondStorage } from './lib/bondStorage.js';
+import { clearEquipAffixStorage } from './lib/equipAffixStorage.js';
 import { rollAffixesForEquip, sumAffixStats } from './lib/equipAffixes.js';
 import { getForgeLevelFromInventory } from './lib/baseProgress.js';
 import { EQUIP_SLOTS, listEquipBySlot, getEquipItem, EQUIPMENT_CATALOG, getEquipSellPrice } from './data/equipment.js';
@@ -123,6 +136,8 @@ import { clearHuntingDailyStorage } from './lib/huntingDailyStorage.js';
 import { CAMP_RECIPES, getCampRecipe } from './data/campRecipes.js';
 import { loadCampRecipeOwnedIds, saveCampRecipeOwnedIds, clearCampRecipeStorage } from './lib/campRecipeStorage.js';
 import GardenPanel from './components/GardenPanel.jsx';
+import StoryCgFrame from './components/StoryCgFrame.jsx';
+import { getStoryCgImagePaths } from './data/storyCgPaths.js';
 import {
   buildBattleHeroesWithAura,
   getCaptainPassiveDef,
@@ -138,7 +153,7 @@ import {
   getJackInvertedDustDamagePerEnemy,
   getJackInvertedPanaceaDamage,
 } from './game/jackInvertedItems.js';
-import { SFX, unlockAudio, loadSfxSettings, setSfxEnabled, setSfxVolume } from './lib/sfx.js';
+import { SFX, unlockAudio, loadSfxSettings, setSfxEnabled, setSfxVolume, clearSfxStorage } from './lib/sfx.js';
 import {
   getBuffAllDef,
   getBuffSingleDef,
@@ -340,14 +355,14 @@ export default function App() {
 
   const chapterBgIdMap = useMemo(
     () => ({
-      'ch-0': 'ximu_cun',
+      'ch-0': 'ch0_heijing_zhuiluo',
       'ch-1': 'cuiying_linhai',
       'ch-2': 'shuangzhu_binghe',
       'ch-3': 'xingjie_gang',
       'ch-4': 'yanji_volcano',
       'ch-5': 'xingzhui_yiji',
-      // ch-6 黯潮深淵：目前缺圖，先 fallback 使用者選的背景
-      // ch-7 終幕試煉：沿用使用者選的背景（看你之後要不要做專屬圖）
+      'ch-6': 'anchao_shenyuan',
+      'ch-7': 'anchao_shenyuan',
     }),
     [],
   );
@@ -642,7 +657,15 @@ export default function App() {
       setStarWishLastMsg(`星曉晶石不足（需要 ${STAR_WISH_PULL_COST}）。`);
       return;
     }
-    setStarCrystals((c) => c - STAR_WISH_PULL_COST);
+    /** 大廳背景「星墜遺跡」：當日首次祈願抽卡返還 20 晶（僅限一般祈願扣款這條路徑） */
+    const STARFALL_LOBBY_BG_ID = 'xingzhui_yiji';
+    const STARFALL_WISH_REFUND = 20;
+    const grantStarfallRefund = lobbyBgId === STARFALL_LOBBY_BG_ID && !hasClaimedStarfallWishRefundToday();
+    const refundAmt = grantStarfallRefund ? STARFALL_WISH_REFUND : 0;
+    if (grantStarfallRefund) markStarfallWishRefundClaimed();
+    setStarCrystals((c) => c - STAR_WISH_PULL_COST + refundAmt);
+    const refundSuffix = grantStarfallRefund ? ` 星墜遺跡：返還 ${STARFALL_WISH_REFUND} 星曉晶石（每日一次）。` : '';
+
     const nWishLeft = remainingWishHeroIds.length;
     const hitChar = nWishLeft > 0 && Math.random() < STAR_WISH_CHAR_RATE;
     if (hitChar) {
@@ -653,7 +676,7 @@ export default function App() {
       SFX.skill();
       const nm = HEROES_BASE.find((h) => h.id === pick)?.name ?? pick;
       setStarWishRewardPreview({ type: 'hero', heroId: pick });
-      setStarWishLastMsg(`星曉祈願邂逅：獲得「${nm}」！直購價格已重置。`);
+      setStarWishLastMsg(`星曉祈願邂逅：獲得「${nm}」！直購價格已重置。${refundSuffix}`);
       return;
     }
     const junk = rollStarWishJunkReward();
@@ -667,9 +690,9 @@ export default function App() {
       if (g > 0) setTalentR4Prog((s) => ({ ...(s ?? {}), crystals: Math.max(0, (s?.crystals ?? 0) + g), byHero: s?.byHero ?? {} }));
       setStarWishRewardPreview({ type: 'r4crystal', amount: g });
       setStarWishLastMsg(
-        allWishOwned
+        (allWishOwned
           ? `獲得天賦碎晶 +${g}。（可用於解鎖/升級「碎晶列」）`
-          : `獲得天賦碎晶 +${g}。（可用於解鎖/升級「碎晶列」；未邂逅到限定角，直購價格已降低）`
+          : `獲得天賦碎晶 +${g}。（可用於解鎖/升級「碎晶列」；未邂逅到限定角，直購價格已降低）`) + refundSuffix
       );
     } else if (junk.kind === 'item' && junk.itemId) {
       const n = Math.max(1, Math.floor(junk.amount ?? 1));
@@ -678,17 +701,15 @@ export default function App() {
       const it = getItem(itemId);
       setStarWishRewardPreview({ type: 'item', itemId, amount: n });
       setStarWishLastMsg(
-        allWishOwned
-          ? `獲得「${it?.name ?? itemId}」×${n}。`
-          : `獲得「${it?.name ?? itemId}」×${n}。${pullNote}`
+        (allWishOwned ? `獲得「${it?.name ?? itemId}」×${n}。` : `獲得「${it?.name ?? itemId}」×${n}。${pullNote}`) + refundSuffix
       );
     } else {
       const g = Math.max(0, Math.floor(junk.amount ?? 0));
       if (g > 0) setGold((x) => x + g);
       setStarWishRewardPreview({ type: 'gold', amount: g });
-      setStarWishLastMsg(allWishOwned ? `獲得金幣 +${g}。` : `獲得金幣 +${g}。${pullNote}`);
+      setStarWishLastMsg((allWishOwned ? `獲得金幣 +${g}。` : `獲得金幣 +${g}。${pullNote}`) + refundSuffix);
     }
-  }, [remainingWishHeroIds, starCrystals, unlockHero, isStarWishUnlocked]);
+  }, [remainingWishHeroIds, starCrystals, unlockHero, isStarWishUnlocked, lobbyBgId]);
 
   const directPurchaseWishHero = useCallback(
     (heroId) => {
@@ -1351,9 +1372,16 @@ export default function App() {
       .map((u) => applyEquipmentToHero(u, equipItemIdsForHero(u.id)))
       .map((u) => applyTalentStatsToUnit({ ...u, isHero: true }, talentMap));
     if (roster.length < MIN_PARTY) return;
+
+    // 裝備副詞條：若本次開戰才補齊詞條，必須同步寫入副本再計算加成（setState 同時刻尚未更新，否則該場戰鬥詞條會變成 0 生效）
+    let instScratch = (equipInstances ?? []).map((x) => ({
+      ...x,
+      affixes: Array.isArray(x.affixes) ? [...x.affixes] : [],
+    }));
+    let equipInstDirty = false;
+
     const { heroes: h0, auraLine } = buildBattleHeroesWithAura(roster, partyIds[0]);
 
-    // 裝備詞條（instance）：確保「目前穿戴的實例」有詞條
     for (const hero of roster) {
       const eq2 = equipForHeroV2(hero.id);
       const slots = [
@@ -1363,14 +1391,20 @@ export default function App() {
       ];
       for (const s of slots) {
         if (!s.eid) continue;
-        const inst = getInstanceByEid(s.eid);
+        const idx = instScratch.findIndex((x) => x.eid === s.eid);
+        if (idx < 0) continue;
+        const inst = instScratch[idx];
         if (!inst?.itemId) continue;
         if (Array.isArray(inst.affixes) && inst.affixes.length > 0) continue;
         const salt = Math.max(0, Math.floor(Number(inst.salt) || 0));
         const affixes = rollAffixesForEquip({ heroId: hero.id, slotKey: s.slotKey, itemId: inst.itemId, forgeLevel, salt });
-        setEquipInstances((list) => (Array.isArray(list) ? list.map((x) => (x.eid === s.eid ? { ...x, affixes } : x)) : []));
+        instScratch[idx] = { ...inst, affixes };
+        equipInstDirty = true;
       }
     }
+    if (equipInstDirty) setEquipInstances(instScratch);
+
+    const getInstForBattle = (eid) => (eid ? instScratch.find((x) => x.eid === eid) ?? null : null);
 
     const applyForgeAndAffixBonus = (hero) => {
       if (!hero?.isHero) return hero;
@@ -1401,7 +1435,7 @@ export default function App() {
       };
       {
         const e2 = equipForHeroV2(hero.id);
-        const insts = [getInstanceByEid(e2.weaponEid), getInstanceByEid(e2.offhandEid), getInstanceByEid(e2.armorEid)].filter(Boolean);
+        const insts = [getInstForBattle(e2.weaponEid), getInstForBattle(e2.offhandEid), getInstForBattle(e2.armorEid)].filter(Boolean);
         const s = sumAffixStats(insts.flatMap((x) => x.affixes ?? []));
         affixStats.hp += s.hp;
         affixStats.atk += s.atk;
@@ -2421,7 +2455,14 @@ export default function App() {
             ＋敵方全體眩目（{e.dazzleAll.turns} 回合）
           </span>
         ) : null;
-      const extraBadges = [splashBadge, debuffBadge, dazzleAllBadge, ailBadge, selfOnBadge].filter(Boolean);
+      const ab = e.allyBuff;
+      const allyBuffBadge =
+        ab?.type === 'dmgVsWeaknessSeen' && typeof ab.mul === 'number' && ab.mul > 1 ? (
+          <span className="inline-flex items-center gap-1 text-sky-200 font-black">
+            ＋我方全體看破特攻：對已顯示弱點傷害 +{Math.round((ab.mul - 1) * 100)}%（{Math.max(1, Math.floor(Number(ab.turns) || 1))} 回合）
+          </span>
+        ) : null;
+      const extraBadges = [splashBadge, debuffBadge, dazzleAllBadge, ailBadge, selfOnBadge, allyBuffBadge].filter(Boolean);
       return (
         <div className="space-y-0.5">
           <div className="inline-flex items-center gap-x-1.5 whitespace-nowrap">
@@ -4248,8 +4289,11 @@ export default function App() {
     clearStarWishStorage();
     clearMusicStorage();
     clearHeroEquipStorage();
+    clearEquipInstanceStorage();
+    clearEquipAffixStorage();
     clearEquipInventory();
     clearItemInventory();
+    clearBondStorage();
     clearHeroUnlockStorage();
     clearStageProgressStorage();
     clearBossLootStorage();
@@ -4265,12 +4309,22 @@ export default function App() {
     clearCampRecipeStorage();
     clearSkillMasteryStorage();
     clearLobbyBgStorage();
+    clearStarfallWishRefundStorage();
     clearLobbyHeroStorage();
+    clearSfxStorage();
+    try {
+      window.localStorage.removeItem('aethelgard-camp-buff-v1');
+    } catch {
+      /* ignore */
+    }
     setGold(0);
     setStarCrystals(0);
     setStarWishDiscountPulls(0);
     setStarWishLastMsg('');
     setHeroEquipV2(loadHeroEquipMapV2());
+    setEquipInstances(loadEquipInstances());
+    setEquipAffixMap({});
+    setBondMap(loadBondMap());
     setEquipModalHeroId(null);
     setEquipInv(loadEquipInventory());
     setItemInv(loadItemInventory());
@@ -4292,7 +4346,7 @@ export default function App() {
     setStageNotice('');
     setStoryStageId(null);
     setStoryLineIdx(0);
-    setPartyNotice('帳號已重置：隊伍與等級／經驗已還原為預設。');
+    setPartyNotice('帳號已重置：本機進度、背包、裝備、羈絆與設定已還原為預設。');
     setVictoryXpReport(null);
     setVictoryGoldGain(0);
     setVictoryXpFootnote('');
@@ -4306,6 +4360,13 @@ export default function App() {
     setScene('lobby');
     setLobbyBgId(loadLobbyBgId());
     setLobbyHeroId(getInitialLobbyHeroId());
+    setCampBuff(null);
+    const sfxNext = loadSfxSettings();
+    setSfxEnabledState(sfxNext.enabled);
+    setSfxVolumeState(sfxNext.volume);
+    const musicNext = loadMusicSettings();
+    setMusicEnabledState(musicNext.enabled);
+    setMusicVolumeState(musicNext.volume);
   };
 
   const getInstanceByEid = (eid) => (equipInstances ?? []).find((x) => x.eid === eid) ?? null;
@@ -4318,6 +4379,34 @@ export default function App() {
     const o = getInstanceByEid(e.offhandEid);
     const a = getInstanceByEid(e.armorEid);
     return { weaponId: w?.itemId ?? null, offhandId: o?.itemId ?? null, armorId: a?.itemId ?? null };
+  };
+
+  /** 與開戰 applyForgeAndAffixBonus 相同：裝備白字 + 鍛造加成 + 副詞條平整加總（六維），另回傳 sumAffixStats 原始值供介面備註 */
+  const getHeroTotalEquipFlatBonuses = (heroId) => {
+    const eqIds = equipItemIdsForHero(heroId);
+    const catalog = getEquipStatBonus(eqIds);
+    const forgeLevel = getForgeLevelFromInventory(itemInv);
+    const forgeMul = 1 + Math.max(0, Math.min(4, forgeLevel)) * 0.02;
+    const forgeDelta = {
+      hp: Math.round((catalog.hp ?? 0) * (forgeMul - 1)),
+      atk: Math.round((catalog.atk ?? 0) * (forgeMul - 1)),
+      matk: Math.round((catalog.matk ?? 0) * (forgeMul - 1)),
+      def: Math.round((catalog.def ?? 0) * (forgeMul - 1)),
+      mdef: Math.round((catalog.mdef ?? 0) * (forgeMul - 1)),
+      spd: Math.round((catalog.spd ?? 0) * (forgeMul - 1)),
+    };
+    const e2 = equipForHeroV2(heroId);
+    const insts = [getInstanceByEid(e2.weaponEid), getInstanceByEid(e2.offhandEid), getInstanceByEid(e2.armorEid)].filter(Boolean);
+    const aff = sumAffixStats(insts.flatMap((x) => x.affixes ?? []));
+    return {
+      hp: (catalog.hp ?? 0) + forgeDelta.hp + (aff.hp ?? 0),
+      atk: (catalog.atk ?? 0) + forgeDelta.atk + (aff.atk ?? 0),
+      matk: (catalog.matk ?? 0) + forgeDelta.matk + (aff.matk ?? 0),
+      def: (catalog.def ?? 0) + forgeDelta.def + (aff.def ?? 0),
+      mdef: (catalog.mdef ?? 0) + forgeDelta.mdef + (aff.mdef ?? 0),
+      spd: (catalog.spd ?? 0) + forgeDelta.spd + (aff.spd ?? 0),
+      affixAgg: aff,
+    };
   };
 
   const equippedEidOwner = useMemo(() => {
@@ -4442,11 +4531,12 @@ export default function App() {
       setShopDialog(`「你的裝備背包已滿（上限 ${EQUIP_INSTANCE_CAP}）。先去賣掉一些再來買吧。」`);
       return;
     }
-    if (gold < (it.price ?? 0)) {
-      setShopDialog(`「金幣不夠喔。${it.name} 需要 ${it.price} 金。」`);
+    const pay = applyLobbyShopBuyGoldPrice(lobbyBgId, it.price ?? 0);
+    if (gold < pay) {
+      setShopDialog(`「金幣不夠喔。${it.name} 需要 ${pay} 金。」`);
       return;
     }
-    setGold((g) => g - it.price);
+    setGold((g) => g - pay);
     setEquipInstances((list) => [...(Array.isArray(list) ? list : []), { eid: `eq_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`, itemId: it.id, affixes: [], salt: 0, locked: false }]);
     setShopDialog(`「成交！你買下了 ${it.name}。」`);
   };
@@ -4484,11 +4574,12 @@ export default function App() {
       setShopDialog(`「${it.name} 你身上已經帶滿了（最多 ${cap}）。」`);
       return;
     }
-    if (gold < (it.price ?? 0)) {
-      setShopDialog(`「金幣不夠喔。${it.name} 需要 ${it.price} 金。」`);
+    const pay = applyLobbyShopBuyGoldPrice(lobbyBgId, it.price ?? 0);
+    if (gold < pay) {
+      setShopDialog(`「金幣不夠喔。${it.name} 需要 ${pay} 金。」`);
       return;
     }
-    setGold((g) => g - it.price);
+    setGold((g) => g - pay);
     setItemInv((inv) => incInv(inv, it.id, 1));
     setShopDialog(`「${it.name} 已放入背包。」`);
   };
@@ -4797,6 +4888,30 @@ export default function App() {
                           } else if (code === 'star5k') {
                             setStarCrystals((c) => c + 5000);
                             setRedeemMsg('兌換成功：星曉晶石 +5000。');
+                            setRedeemCode('');
+                          } else if (code === 'startergear' || code === 'basicgear') {
+                            // Give a small starter set as equip instances (v2).
+                            // Keep it simple: one weapon, one offhand, one armor.
+                            const give = [
+                              { id: 'w_iron_sword', name: '鐵劍' },
+                              { id: 'o_small_shield', name: '小圓盾' },
+                              { id: 'a_leather', name: '皮甲' },
+                            ];
+                            const cap = typeof EQUIP_INSTANCE_CAP === 'number' ? EQUIP_INSTANCE_CAP : 50;
+                            const curCount = equipInstances?.length ?? 0;
+                            if (curCount + give.length > cap) {
+                              setRedeemMsg(`兌換失敗：裝備背包容量不足（目前 ${curCount}/${cap}）。請先出售或丟棄一些裝備。`);
+                              return;
+                            }
+                            const mk = (itemId) => ({
+                              eid: `eq_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`,
+                              itemId,
+                              affixes: [],
+                              salt: 0,
+                              locked: false,
+                            });
+                            setEquipInstances((list) => [...(Array.isArray(list) ? list : []), ...give.map((x) => mk(x.id))]);
+                            setRedeemMsg(`兌換成功：基本裝備已加入背包（${give.map((x) => x.name).join('、')}）。`);
                             setRedeemCode('');
                           } else {
                             setRedeemMsg('兌換碼無效。');
@@ -6831,6 +6946,7 @@ export default function App() {
                             ],
                           };
                     const lines = def.lines;
+                    const cgPaths = getStoryCgImagePaths(storyStageId);
                     const i = Math.max(0, Math.min(lines.length - 1, storyLineIdx));
                     const atEnd = i >= lines.length - 1;
                     const cur = lines[i];
@@ -6838,24 +6954,8 @@ export default function App() {
                     return (
                       <>
                   <div className="grid grid-cols-2 gap-3">
-                    <div className="rounded-2xl border border-white/10 bg-slate-900/30 overflow-hidden flex items-center justify-center min-h-[16rem]">
-                      <div className="text-center p-4">
-                        <p className="text-[10px] font-black text-slate-300">{def.leftCgLabel}</p>
-                        <p className="text-[9px] text-slate-600 mt-1">在此放置圖片</p>
-                        <div className="mt-3 h-44 w-44 rounded-2xl border border-dashed border-white/15 bg-black/20 flex items-center justify-center text-slate-600 text-[10px] font-bold">
-                          CG FRAME
-                        </div>
-                      </div>
-                    </div>
-                    <div className="rounded-2xl border border-white/10 bg-slate-900/30 overflow-hidden flex items-center justify-center min-h-[16rem]">
-                      <div className="text-center p-4">
-                        <p className="text-[10px] font-black text-slate-300">{def.rightCgLabel}</p>
-                        <p className="text-[9px] text-slate-600 mt-1">在此放置圖片</p>
-                        <div className="mt-3 h-44 w-44 rounded-2xl border border-dashed border-white/15 bg-black/20 flex items-center justify-center text-slate-600 text-[10px] font-bold">
-                          CG FRAME
-                        </div>
-                      </div>
-                    </div>
+                    <StoryCgFrame label={def.leftCgLabel} src={cgPaths?.left} />
+                    <StoryCgFrame label={def.rightCgLabel} src={cgPaths?.right} />
                   </div>
 
                   <div className="mt-3 rounded-2xl border border-white/10 bg-black/35 p-5">
@@ -7079,6 +7179,9 @@ export default function App() {
                             .filter((it) => getShopPrismCount() >= (it.shopPrismMin ?? 2))
                             .map((it) => {
                               const sell = getEquipSellPrice(it);
+                              const pay = applyLobbyShopBuyGoldPrice(lobbyBgId, it.price ?? 0);
+                              const bagFull = (equipInstances?.length ?? 0) >= EQUIP_INSTANCE_CAP;
+                              const cantAffordEquip = gold < pay;
                               return (
                                 <div key={it.id} className="rounded-xl border border-white/10 bg-black/30 px-3 py-2">
                                   <div className="flex items-start justify-between gap-2">
@@ -7090,10 +7193,11 @@ export default function App() {
                                     </div>
                                     <button
                                       type="button"
+                                      disabled={bagFull || cantAffordEquip}
                                       onClick={() => buyEquip(it.id)}
-                                      className="shrink-0 px-3 py-2 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/45 border border-emerald-500/40 text-[10px] font-black text-emerald-100 tabular-nums"
+                                      className="shrink-0 px-3 py-2 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/45 border border-emerald-500/40 text-[10px] font-black text-emerald-100 tabular-nums disabled:opacity-45 disabled:pointer-events-none"
                                     >
-                                      買 {it.price}
+                                      買 {pay}
                                     </button>
                                   </div>
                                   <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-black text-slate-200 tabular-nums">
@@ -7231,6 +7335,10 @@ export default function App() {
                         const owned = getInvCount(itemInv, it.id);
                         const sell = getItemSellPrice(it);
                         const disabledSell = owned <= 0 || sell <= 0;
+                        const pay = applyLobbyShopBuyGoldPrice(lobbyBgId, it.price ?? 0);
+                        const capBuy = getItemMaxStack(it);
+                        const invFullBuy = capBuy < 999 && owned >= capBuy;
+                        const cantAffordItem = shopMode === 'buy-item' && gold < pay;
                         return (
                           <div key={it.id} className="rounded-xl border border-white/10 bg-black/30 px-3 py-2">
                             <div className="flex items-start justify-between gap-2">
@@ -7243,10 +7351,11 @@ export default function App() {
                               {shopMode === 'buy-item' ? (
                                 <button
                                   type="button"
+                                  disabled={invFullBuy || cantAffordItem}
                                   onClick={() => buyItem(it.id)}
-                                  className="shrink-0 px-3 py-2 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/45 border border-emerald-500/40 text-[10px] font-black text-emerald-100 tabular-nums"
+                                  className="shrink-0 px-3 py-2 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/45 border border-emerald-500/40 text-[10px] font-black text-emerald-100 tabular-nums disabled:opacity-45 disabled:pointer-events-none"
                                 >
-                                  買 {it.price}
+                                  買 {pay}
                                 </button>
                               ) : (
                                 <button
@@ -7871,7 +7980,8 @@ export default function App() {
               </div>
               <h3 className="text-lg font-black italic text-center mb-2 text-white">重置帳號</h3>
               <p className="text-[11px] text-slate-400 text-center mb-4 leading-relaxed">
-                將清除本機儲存的<strong className="text-slate-300"> 隊伍編成 </strong>與<strong className="text-slate-300"> 等級／經驗值 </strong>
+                將清除本機儲存的<strong className="text-slate-300"> 遊戲進度 </strong>（含隊伍、關卡、資源、背包與裝備、羈絆／合體技、天賦、每日與生活玩法紀錄等）與
+                <strong className="text-slate-300"> 音效／音樂音量開關 </strong>
                 ，無法復原。若確定要繼續，請在下方輸入 <span className="font-mono font-black text-amber-300">reset</span>（全小寫）。
               </p>
               <label className="block text-[9px] font-black uppercase tracking-wide text-slate-500 mb-1.5">確認文字</label>
@@ -7912,7 +8022,7 @@ export default function App() {
         )}
 
         {equipModalHeroId && (
-          <div className="fixed inset-0 z-[118] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6">
+          <div className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6">
             {(() => {
               const hero = HEROES_BASE.find((h) => h.id === equipModalHeroId);
               if (!hero) return null;
@@ -8106,13 +8216,32 @@ export default function App() {
               const heroBase = HEROES_BASE.find((h) => h.id === heroInfo.heroId);
               if (!heroBase) return null;
               const equip = equipItemIdsForHero(heroBase.id);
-              const bonus = getEquipStatBonus(equip);
+              const bonus = getHeroTotalEquipFlatBonuses(heroBase.id);
               const eqSum = getEquipSummary(equip);
               const xpMap = loadHeroXpMap();
               const prog = xpMap[heroBase.id] ?? defaultProgress();
               const leveled = applyLevelLinearStatsToHero(heroBase, prog);
-              const final0 = applyEquipmentToHero(leveled, equip);
-              const final = applyTalentStatsToUnit({ ...final0, isHero: true }, talentMap);
+              const preTalent = {
+                ...leveled,
+                hp: Math.max(1, leveled.hp + bonus.hp),
+                atk: Math.max(1, leveled.atk + bonus.atk),
+                matk: Math.max(0, (leveled.matk ?? 0) + bonus.matk),
+                def: Math.max(1, leveled.def + bonus.def),
+                mdef: Math.max(1, (leveled.mdef ?? leveled.def) + bonus.mdef),
+                spd: Math.max(1, leveled.spd + bonus.spd),
+              };
+              const final = applyTalentStatsToUnit({ ...preTalent, isHero: true }, talentMap);
+              const aff = bonus.affixAgg ?? {};
+              const affixExtraLine = (() => {
+                const bits = [];
+                if ((aff.critRateAdd ?? 0) > 0) bits.push(`暴擊率+${Math.round(aff.critRateAdd)}%`);
+                if ((aff.critDmgMul ?? 1) > 1) bits.push(`暴擊傷害×${Number(aff.critDmgMul).toFixed(2)}`);
+                if ((aff.skillDmgMul ?? 1) > 1) bits.push(`技能傷害×${Number(aff.skillDmgMul).toFixed(2)}`);
+                if ((aff.incomingDmgMul ?? 1) < 1) bits.push(`受傷×${Number(aff.incomingDmgMul).toFixed(2)}`);
+                if ((aff.ccHitAdd ?? 0) > 0) bits.push(`控場命中+${Math.round(aff.ccHitAdd * 100)}%`);
+                if ((aff.ailResistAdd ?? 0) > 0) bits.push(`異常抗性+${Math.round(aff.ailResistAdd * 100)}%`);
+                return bits.length ? bits.join(' · ') : null;
+              })();
               const skills = getSkillsForHero({ id: heroBase.id }) ?? [];
               const pick = getTalentPick(talentMap, heroBase.id);
               const row3 = getHeroRow3Def(heroBase.id);
@@ -8197,13 +8326,18 @@ export default function App() {
                     </div>
 
                     <div className="rounded-2xl border border-white/10 bg-black/30 p-3 space-y-1.5">
-                      <p className="text-[9px] font-black text-slate-400">數值（基礎+裝備）</p>
+                      <p className="text-[9px] font-black text-slate-400">數值：基礎 ｜ +裝備總加成（白字＋鍛造＋詞條平整）｜ 最終（含天賦）</p>
                       {statRow('HP', leveled.hp, bonus.hp, final.hp)}
                       {statRow('攻擊', leveled.atk, bonus.atk, final.atk)}
                       {statRow('魔力', leveled.matk ?? 0, bonus.matk, final.matk ?? 0)}
                       {statRow('物防', leveled.def, bonus.def, final.def)}
                       {statRow('魔抗', leveled.mdef ?? leveled.def, bonus.mdef, final.mdef ?? final.def)}
                       {statRow('速度', leveled.spd, bonus.spd, final.spd)}
+                      {affixExtraLine ? (
+                        <p className="text-[9px] font-bold text-cyan-200/85 leading-snug pt-1 border-t border-white/5">副詞條（乘算／機率類）：{affixExtraLine}</p>
+                      ) : (
+                        <p className="text-[9px] font-bold text-slate-600 pt-1">副詞條（乘算／機率類）：無或僅平整屬性已併入上列</p>
+                      )}
                     </div>
 
                       <div className="rounded-2xl border border-white/10 bg-black/30 p-3">
@@ -8456,7 +8590,14 @@ export default function App() {
                                         解鎖：羈絆 Lv.{need}（目前 Lv.{lv}）
                                       </p>
                                       <p className="text-[10px] font-bold text-slate-300 mt-1 leading-snug">
-                                        {d.skill ? `效果：${describeSkillEffect(d.skill)}` : '效果：尚未實裝（之後可補技能資料）'}
+                                        {d.skill ? (
+                                          <>
+                                            <span className="text-slate-500">效果：</span>
+                                            {describeSkillEffect(d.skill)}
+                                          </>
+                                        ) : (
+                                          '效果：尚未實裝（之後可補技能資料）'
+                                        )}
                                       </p>
                                       <p className="text-[9px] font-black text-slate-500 mt-1">代價：施放者與夥伴皆進入硬直（行動延後）。</p>
                                     </div>
@@ -8474,14 +8615,21 @@ export default function App() {
                   </div>
 
                   <div className="px-5 pb-5 pt-3 border-t border-white/10 bg-slate-900/95 backdrop-blur shrink-0">
-                    <div className="flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => setHeroInfo(null)}
-                      className="px-5 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl font-black text-sm"
-                    >
-                      知道了
-                    </button>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEquipModalHeroId(heroBase.id)}
+                        className="px-5 py-2 bg-white/10 hover:bg-white/15 border border-white/15 rounded-xl font-black text-sm text-slate-100"
+                      >
+                        調整裝備
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setHeroInfo(null)}
+                        className="px-5 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl font-black text-sm"
+                      >
+                        知道了
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -9091,7 +9239,7 @@ export default function App() {
                         將圖檔置於 <span className="text-slate-200 font-mono text-[10px]">public/lobby/</span>，檔名見各卡片下方。未放圖時會顯示主題色漸層。
                       </p>
                       <div className="grid grid-cols-2 gap-2 max-h-[min(60vh,22rem)] overflow-y-auto pr-0.5 no-scrollbar">
-                        {LOBBY_BACKGROUNDS.map((b) => {
+                        {LOBBY_BACKGROUNDS_PICKABLE.map((b) => {
                           const selected = b.id === lobbyBgId;
                           return (
                             <button
@@ -9119,6 +9267,9 @@ export default function App() {
                                 aria-hidden
                               />
                               <p className="mt-1.5 text-[11px] font-black text-white leading-tight">{b.name}</p>
+                              {b.effectHint ? (
+                                <p className="mt-0.5 text-[9px] font-bold text-violet-300/90 leading-snug line-clamp-2">{b.effectHint}</p>
+                              ) : null}
                               <p className="mt-0.5 text-[9px] font-mono text-slate-500 truncate" title={b.image}>
                                 {b.image.replace(/^lobby\//, '')}
                               </p>
@@ -9171,8 +9322,8 @@ export default function App() {
                             ? statOptsAll.filter((o) => [null, 'spd', 'critRateAdd', 'incomingDmgMul', 'ccHitAdd'].includes(o.id))
                             : statOptsAll.filter((o) => [null, 'hp', 'def', 'mdef', 'ailResistAdd'].includes(o.id));
 
-                      const costReroll = 120;
-                      const costForce = 220;
+                      const costReroll = applyLobbyForgeGoldCost(lobbyBgId, 120);
+                      const costForce = applyLobbyForgeGoldCost(lobbyBgId, 220);
                       const cTok = getInvCount(itemInv, 'it_forge_token');
                       const cTokF = getInvCount(itemInv, 'it_forge_token_force');
                       const canPayReroll = cTok > 0 || gold >= costReroll;
@@ -9698,6 +9849,7 @@ export default function App() {
                       prismCount={getShopPrismCount()}
                       setStarCrystals={setStarCrystals}
                       onDailyQuest={bumpDailyQuest}
+                      lobbyBgId={lobbyBgId}
                       onClose={() => setLobbyPanelModal(null)}
                     />
                   ) : (

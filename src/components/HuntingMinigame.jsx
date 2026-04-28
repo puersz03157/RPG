@@ -27,9 +27,10 @@ const TICK_MS = 100;
  *   setItemInv: (fn: (p: Record<string, number>) => Record<string, number>) => void,
  *   setStarCrystals: (fn: (c: number) => number) => void,
  *   onDailyQuest?: (qid: string, add?: number) => void,
+ *   dragonRoundChance?: number,
  * }} props
  */
-export default function HuntingMinigame({ setItemInv, setStarCrystals, onDailyQuest }) {
+export default function HuntingMinigame({ setItemInv, setStarCrystals, onDailyQuest, dragonRoundChance }) {
   const [daily, setDaily] = useState(() => loadHuntingDaily());
   const [phase, setPhase] = useState('lobby');
   const [timeLeftMs, setTimeLeftMs] = useState(HUNTING_DURATION_MS);
@@ -152,7 +153,11 @@ export default function HuntingMinigame({ setItemInv, setStarCrystals, onDailyQu
     penaltyGateRef.current = 0;
     setTargets([]);
     setSummary(null);
-    const dragonThisRound = Math.random() < HUNTING_DRAGON_ROUND_CHANCE;
+    const dragonP =
+      typeof dragonRoundChance === 'number' && dragonRoundChance > 0 && dragonRoundChance <= 1
+        ? dragonRoundChance
+        : HUNTING_DRAGON_ROUND_CHANCE;
+    const dragonThisRound = Math.random() < dragonP;
     const t0 =
       HUNTING_DRAGON_SPAWN_MIN_MS + Math.random() * (HUNTING_DRAGON_SPAWN_MAX_MS - HUNTING_DRAGON_SPAWN_MIN_MS);
 
@@ -176,7 +181,7 @@ export default function HuntingMinigame({ setItemInv, setStarCrystals, onDailyQu
         spawnOne(HUNT_DRAGON);
       }
     }, t0);
-  }, [clearTimers, refreshDaily, spawnOne, onDailyQuest]);
+  }, [clearTimers, refreshDaily, spawnOne, onDailyQuest, dragonRoundChance]);
 
   const onTap = useCallback(
     (uid) => {

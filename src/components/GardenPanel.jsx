@@ -24,6 +24,7 @@ import FishingQTEBar from './FishingQTEBar.jsx';
 import MiningFlipGame from './MiningFlipGame.jsx';
 import HuntingMinigame from './HuntingMinigame.jsx';
 import { SFX, unlockAudio } from '../lib/sfx.js';
+import { lobbyBgHarvestExtraOnce, getLobbyFishingQteAdjustments, getLobbyHuntingDragonRoundChance } from '../lib/lobbyBgBonuses.js';
 
 const FISHING_CAST_GOLD = 25;
 
@@ -48,6 +49,7 @@ function formatRemainMs(ms) {
  *  prismCount: number,
  *  setStarCrystals: (fn: (c: number) => number) => void,
  *  onDailyQuest?: (qid: string, add?: number) => void,
+ *  lobbyBgId?: string,
  *  onClose: () => void,
  * }} props
  */
@@ -63,6 +65,7 @@ export default function GardenPanel({
   prismCount,
   setStarCrystals,
   onDailyQuest,
+  lobbyBgId = '',
   onClose,
 }) {
   const [tab, setTab] = useState('farm');
@@ -143,7 +146,8 @@ export default function GardenPanel({
       const cr = getCrop(p?.cropId ?? null);
       if (!p?.cropId || !cr) return;
       if (!isCropReady(p, cr, now)) return;
-      setItemInv((inv) => incInv(inv, cr.harvestItemId, 1));
+      const extra = lobbyBgHarvestExtraOnce(lobbyBgId);
+      setItemInv((inv) => incInv(inv, cr.harvestItemId, extra ? 2 : 1));
       setGardenPlots((plots) => {
         const next = plots.slice();
         next[plotIdx] = { cropId: null, plantedAt: null, watered: false };
@@ -151,10 +155,10 @@ export default function GardenPanel({
       });
       unlockAudio();
       SFX.levelUp();
-      setMsg('採收完成。');
+      setMsg(extra ? '採收完成（翠影林海：額外收成 +1）。' : '採收完成。');
       onDailyQuest?.('harvest_crop', 1);
     },
-    [gardenPlots, now, setGardenPlots, setItemInv, onDailyQuest],
+    [gardenPlots, now, setGardenPlots, setItemInv, onDailyQuest, lobbyBgId],
   );
 
   const baitMul = useCallback((baitId) => {
@@ -372,7 +376,14 @@ export default function GardenPanel({
 
       {tab === 'mine' && <MiningFlipGame setItemInv={setItemInv} setStarCrystals={setStarCrystals} onDailyQuest={onDailyQuest} />}
 
-      {tab === 'hunt' && <HuntingMinigame setItemInv={setItemInv} setStarCrystals={setStarCrystals} onDailyQuest={onDailyQuest} />}
+      {tab === 'hunt' && (
+        <HuntingMinigame
+          setItemInv={setItemInv}
+          setStarCrystals={setStarCrystals}
+          onDailyQuest={onDailyQuest}
+          dragonRoundChance={getLobbyHuntingDragonRoundChance(lobbyBgId)}
+        />
+      )}
 
       {tab === 'fish' && (
         <div className="space-y-3">
@@ -482,9 +493,17 @@ export default function GardenPanel({
             <FishingQTEBar
               key={qte.fish.id + String(qte.zoneCenter)}
               fishName={qte.fish.name}
-              zoneWidth={FISH_RARITY_QTE[qte.fish.rarity]?.qteZoneWidth ?? 0.2}
+              zoneWidth={(() => {
+                const base = FISH_RARITY_QTE[qte.fish.rarity]?.qteZoneWidth ?? 0.2;
+                const { zoneWidthMul } = getLobbyFishingQteAdjustments(lobbyBgId);
+                return Math.min(0.92, Math.max(0.02, base * zoneWidthMul));
+              })()}
               zoneCenter={qte.zoneCenter}
-              needleSpeed={FISH_RARITY_QTE[qte.fish.rarity]?.needleSpeed ?? 3}
+              needleSpeed={(() => {
+                const base = FISH_RARITY_QTE[qte.fish.rarity]?.needleSpeed ?? 3;
+                const { needleSpeedMul } = getLobbyFishingQteAdjustments(lobbyBgId);
+                return Math.max(0.35, base * needleSpeedMul);
+              })()}
               onResult={onQteResult}
             />
           </div>

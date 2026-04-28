@@ -66,6 +66,18 @@ export function setSfxVolume(next) {
   }
 }
 
+export function clearSfxStorage() {
+  enabled = true;
+  volume = 0.7;
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(KEY_ENABLED);
+    window.localStorage.removeItem(KEY_VOLUME);
+  } catch {
+    /* ignore */
+  }
+}
+
 export async function unlockAudio() {
   const c = getCtx();
   if (!c) return false;
