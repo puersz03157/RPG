@@ -1,3 +1,5 @@
+import { mapHeroIds } from '../data/heroIdMap.js';
+
 const ALL_KEY = 'aethelgard-unlock-all-heroes';
 const IDS_KEY = 'aethelgard-unlocked-heroes';
 
@@ -32,7 +34,7 @@ export function loadUnlockedHeroIds() {
     const raw = window.localStorage.getItem(IDS_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return clampIds(parsed);
+    return clampIds(mapHeroIds(parsed));
   } catch {
     return [];
   }

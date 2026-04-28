@@ -85,18 +85,18 @@ export function tryGrantStarCrystalFirstClear(stageId, stageKind) {
   return 5;
 }
 
-/** 經驗關卡通關：+10（每日次數由入場邏輯限制） */
+/** 經驗關卡通關：+5（每日次數由入場邏輯限制） */
 export function grantStarCrystalExpStageClear() {
-  const bal = loadStarCrystalBalance() + 10;
+  const bal = loadStarCrystalBalance() + 5;
   saveStarCrystalBalance(bal);
-  return 10;
+  return 5;
 }
 
-/** 金錢關卡通關：+10（每日次數由入場邏輯限制） */
+/** 金錢關卡通關：+5（每日次數由入場邏輯限制） */
 export function grantStarCrystalGoldStageClear() {
-  const bal = loadStarCrystalBalance() + 10;
+  const bal = loadStarCrystalBalance() + 5;
   saveStarCrystalBalance(bal);
-  return 10;
+  return 5;
 }
 
 export function clearStarCrystalStorage() {

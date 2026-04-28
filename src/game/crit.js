@@ -19,7 +19,27 @@ export function getPhysicalCritChance(atkU) {
   const extra = (atkU?.critRateBuffTurns ?? 0) > 0 ? (atkU.critRateBuffAdd ?? 0) : 0;
   const dazzleAdd = getDazzleCritRateAdd(atkU);
   const captainAdd = atkU?.captainCritRateAdd ?? 0;
-  return Math.min(0.95, Math.max(0, PHYS_CRIT_RATE + extra + dazzleAdd + captainAdd));
+  const affixAdd = Math.max(0, Math.min(0.5, Number(atkU?.affixCritRateAdd ?? 0) || 0));
+  const passive = atkU?.passive?.effect;
+  let passiveAdd = 0;
+  if (passive?.type === 'critRateByBuffCount') {
+    const per = typeof passive.perBuffAdd === 'number' ? passive.perBuffAdd : 0;
+    const max = typeof passive.maxAdd === 'number' ? passive.maxAdd : 0;
+    if (per > 0 && max > 0) {
+      let buffs = 0;
+      if ((atkU?.atkBuffTurns ?? 0) > 0) buffs += 1;
+      if ((atkU?.matkBuffTurns ?? 0) > 0) buffs += 1;
+      if ((atkU?.defBuffTurns ?? 0) > 0) buffs += 1;
+      if ((atkU?.mdefBuffTurns ?? 0) > 0) buffs += 1;
+      if ((atkU?.spdBuffTurns ?? 0) > 0) buffs += 1;
+      if ((atkU?.critRateBuffTurns ?? 0) > 0) buffs += 1;
+      if ((atkU?.critDmgBuffTurns ?? 0) > 0) buffs += 1;
+      if ((atkU?.jackDrawBuffTurns ?? 0) > 0) buffs += 1;
+      if ((atkU?.barrierTurns ?? 0) > 0) buffs += 1;
+      passiveAdd = Math.min(max, Math.max(0, buffs * per));
+    }
+  }
+  return Math.min(0.95, Math.max(0, PHYS_CRIT_RATE + extra + dazzleAdd + captainAdd + affixAdd + passiveAdd));
 }
 
 export function getPhysicalCritDamageMultiplier(atkU) {
@@ -28,5 +48,6 @@ export function getPhysicalCritDamageMultiplier(atkU) {
     atkU?.passive?.effect?.type === 'selfCritDmgMul' && typeof atkU.passive.effect.value === 'number'
       ? Math.max(1, atkU.passive.effect.value)
       : 1;
-  return base * passiveCritDmgMul * getDazzleCritDmgMul(atkU);
+  const affixMul = typeof atkU?.affixCritDmgMul === 'number' ? Math.max(1, atkU.affixCritDmgMul) : 1;
+  return base * passiveCritDmgMul * affixMul * getDazzleCritDmgMul(atkU);
 }

@@ -1,4 +1,5 @@
 import { HEROES_BASE } from '../data/units.js';
+import { mapHeroIds } from '../data/heroIdMap.js';
 
 const STORAGE_KEY = 'aethelgard-party-ids';
 
@@ -24,7 +25,7 @@ export function loadPartyIds() {
     if (!raw) return allIds();
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return allIds();
-    return sanitize(parsed);
+    return sanitize(mapHeroIds(parsed));
   } catch {
     return allIds();
   }

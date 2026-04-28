@@ -7,13 +7,13 @@ export const STAR_WISH_DIRECT_FLOOR = 300;
 export const STAR_WISH_DISCOUNT_PER_PULL = 40;
 
 /** 祈願池角色 id（與 HEROES_BASE 一致） */
-export const STAR_WISH_HERO_IDS = ['h6', 'h7', 'h8', 'h9'];
+export const STAR_WISH_HERO_IDS = ['butiya_halloween', 'bubu_harvest', 'moying', 'jack'];
 
 export const STAR_WISH_HERO_ORDER = [
-  { id: 'h6', name: '萬聖節布提婭' },
-  { id: 'h7', name: '豐收節布布' },
-  { id: 'h8', name: '墨影' },
-  { id: 'h9', name: '傑克' },
+  { id: 'butiya_halloween', name: '萬聖節布提婭' },
+  { id: 'bubu_harvest', name: '豐收節布布' },
+  { id: 'moying', name: '墨影' },
+  { id: 'jack', name: '傑克' },
 ];
 
 /**
@@ -26,26 +26,45 @@ export function getStarWishDirectPrice(pullsSinceReset) {
 }
 
 /**
- * 未邂逅角色時（95%）：僅金幣檔位，權重正規化隨機
- * @returns {{ kind: 'gold', amount: number }}
+ * 未邂逅到限定角時的雜物表（權重總和 1000，與 {@link rollStarWishJunkReward} 共用）
+ * @type {ReadonlyArray<{ w: number, kind: 'gold'|'r4crystal', amount: number } | { w: number, kind: 'item', itemId: string, amount: number }>}
+ */
+export const STAR_WISH_JUNK_TABLE = /** @type {const} */ [
+  { w: 200, kind: 'gold', amount: 50 },
+  { w: 200, kind: 'gold', amount: 100 },
+  { w: 140, kind: 'gold', amount: 180 },
+  { w: 90, kind: 'r4crystal', amount: 1 },
+  { w: 50, kind: 'r4crystal', amount: 2 },
+  { w: 20, kind: 'r4crystal', amount: 3 },
+  { w: 70, kind: 'item', itemId: 'it_tavern_voucher', amount: 1 },
+  { w: 70, kind: 'item', itemId: 'it_forge_token', amount: 1 },
+  { w: 30, kind: 'item', itemId: 'it_forge_token_force', amount: 1 },
+  { w: 60, kind: 'item', itemId: 'it_training_guide', amount: 1 },
+  { w: 70, kind: 'item', itemId: 'it_exp_ticket', amount: 1 },
+];
+
+export const STAR_WISH_JUNK_WEIGHT_SUM = STAR_WISH_JUNK_TABLE.reduce((s, r) => s + r.w, 0);
+
+/**
+ * 未邂逅到限定角時：權重正規化隨機
+ * @returns {{ kind: 'gold'|'r4crystal', amount: number } | { kind: 'item', itemId: string, amount: number }}
  */
 export function rollStarWishJunkReward() {
-  const table = [
-    { w: 20, kind: 'gold', amount: 30 },
-    { w: 20, kind: 'gold', amount: 50 },
-    { w: 18, kind: 'gold', amount: 80 },
-    { w: 14, kind: 'gold', amount: 120 },
-    { w: 8, kind: 'gold', amount: 180 },
-    // 第 4 列天賦：碎晶（可用於解鎖/升級）
-    { w: 12, kind: 'r4crystal', amount: 1 },
-    { w: 6, kind: 'r4crystal', amount: 2 },
-    { w: 2, kind: 'r4crystal', amount: 3 },
-  ];
+  const table = STAR_WISH_JUNK_TABLE;
   const total = table.reduce((s, r) => s + r.w, 0);
   let t = Math.random() * total;
   for (const row of table) {
     t -= row.w;
-    if (t <= 0) return { kind: row.kind, amount: row.amount };
+    if (t <= 0) {
+      if (row.kind === 'item' && row.itemId) {
+        return { kind: 'item', itemId: row.itemId, amount: Math.max(1, Math.floor(Number(row.amount) || 1)) };
+      }
+      return { kind: row.kind, amount: row.amount };
+    }
   }
-  return { kind: table[table.length - 1].kind, amount: table[table.length - 1].amount };
+  const last = table[table.length - 1];
+  if (last.kind === 'item' && 'itemId' in last && last.itemId) {
+    return { kind: 'item', itemId: last.itemId, amount: Math.max(1, Math.floor(Number(last.amount) || 1)) };
+  }
+  return { kind: last.kind, amount: last.amount };
 }

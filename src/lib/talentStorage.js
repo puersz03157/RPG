@@ -1,3 +1,5 @@
+import { mapHeroIdKeys } from '../data/heroIdMap.js';
+
 const STORAGE_KEY = 'aethelgard_talent_map_v1';
 
 /**
@@ -10,7 +12,8 @@ export function loadTalentMap() {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return {};
-    const parsed = JSON.parse(raw);
+    const parsed0 = JSON.parse(raw);
+    const parsed = mapHeroIdKeys(parsed0);
     if (!parsed || typeof parsed !== 'object') return {};
     return parsed;
   } catch {

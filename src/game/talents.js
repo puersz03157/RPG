@@ -62,6 +62,81 @@ export function getDamageMulFromTalents({ talentMap, attacker, target }) {
   return 1;
 }
 
+export function getSkillDamageMulVsStunImmuneFromTalents({ talentMap, casterHeroId, skillId, target }) {
+  const e = getHeroRow3Effect(talentMap, casterHeroId);
+  if (e?.type !== 'skillDmgVsStunImmuneMul') return 1;
+  if (e.skillId && skillId && e.skillId !== skillId) return 1;
+  if (!target || (target.stunImmuneTurns ?? 0) <= 0) return 1;
+  return typeof e.mul === 'number' ? Math.max(0, e.mul) : 1;
+}
+
+export function getSkillAilmentChanceAddFromTalents({ talentMap, casterHeroId, skillId, ailmentType }) {
+  const e = getHeroRow3Effect(talentMap, casterHeroId);
+  if (e?.type !== 'skillAilmentChanceAdd') return 0;
+  if (e.skillId && skillId && e.skillId !== skillId) return 0;
+  if (e.ailmentType && ailmentType && e.ailmentType !== ailmentType) return 0;
+  return typeof e.add === 'number' ? e.add : 0;
+}
+
+export function getHealTargetMpFlatFromTalents(talentMap, casterHeroId) {
+  const e = getHeroRow3Effect(talentMap, casterHeroId);
+  if (e?.type !== 'healTargetMpFlat') return 0;
+  return Math.max(0, Math.floor(Number(e.mp) || 0));
+}
+
+export function getOutgoingHealMulFromTalents(talentMap, casterHeroId) {
+  const e = getHeroRow3Effect(talentMap, casterHeroId);
+  if (e?.type !== 'healMul') return 1;
+  return typeof e.mul === 'number' ? Math.max(0, e.mul) : 1;
+}
+
+export function getIncomingHealMulFromTalents(talentMap, targetHeroId) {
+  const e = getHeroRow3Effect(talentMap, targetHeroId);
+  if (e?.type !== 'incomingHealMul') return 1;
+  return typeof e.mul === 'number' ? Math.max(0, e.mul) : 1;
+}
+
+export function getChainHealOnHealFromTalents(talentMap, casterHeroId) {
+  const e = getHeroRow3Effect(talentMap, casterHeroId);
+  if (e?.type !== 'chainHealOnHeal') return null;
+  const chance = typeof e.chance === 'number' ? Math.max(0, Math.min(1, e.chance)) : 0;
+  const ratio = typeof e.ratio === 'number' ? Math.max(0, e.ratio) : 0;
+  if (!(chance > 0) || !(ratio > 0)) return null;
+  return { chance, ratio };
+}
+
+export function getMpOnAllyDirectDamageFromTalents(talentMap, heroId) {
+  const e = getHeroRow3Effect(talentMap, heroId);
+  if (e?.type !== 'mpOnAllyDirectDamage') return null;
+  const mp = Math.max(0, Math.floor(Number(e.mp) || 0));
+  const perTurnCap = Math.max(0, Math.floor(Number(e.perTurnCap) || 0));
+  if (!(mp > 0) || !(perTurnCap > 0)) return null;
+  return { mp, perTurnCap };
+}
+
+export function getMpOnHitByAilmentedEnemyFromTalents(talentMap, heroId) {
+  const e = getHeroRow3Effect(talentMap, heroId);
+  if (e?.type !== 'mpOnHitByAilmentedEnemy') return null;
+  const mp = Math.max(0, Math.floor(Number(e.mp) || 0));
+  const perTurnCap = Math.max(0, Math.floor(Number(e.perTurnCap) || 0));
+  if (!(mp > 0) || !(perTurnCap > 0)) return null;
+  return { mp, perTurnCap };
+}
+
+export function hasDoubleDotFromSelfTalent(talentMap, heroId) {
+  const e = getHeroRow3Effect(talentMap, heroId);
+  return e?.type === 'doubleDotFromSelf';
+}
+
+export function getOnKillSpdBuffFromTalents(talentMap, heroId) {
+  const e = getHeroRow3Effect(talentMap, heroId);
+  if (e?.type !== 'onKillSpdBuff') return null;
+  const turns = Math.max(1, Math.floor(Number(e.turns) || 0));
+  const mul = typeof e.mul === 'number' ? e.mul : 1;
+  if (!(mul > 1) || !(turns > 0)) return null;
+  return { turns, mul };
+}
+
 export function getSplashMulOverrideFromTalents({ talentMap, caster, skill, baseMul }) {
   if (!caster?.isHero) return baseMul;
   const e = getHeroRow3Effect(talentMap, caster.id);

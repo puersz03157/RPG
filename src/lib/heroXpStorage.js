@@ -1,4 +1,5 @@
 import { HEROES_BASE } from '../data/units.js';
+import { mapHeroIdKeys } from '../data/heroIdMap.js';
 
 const STORAGE_KEY = 'aethelgard-hero-xp';
 
@@ -29,7 +30,8 @@ export function loadHeroXpMap() {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return base;
-    const parsed = JSON.parse(raw);
+    const parsed0 = JSON.parse(raw);
+    const parsed = mapHeroIdKeys(parsed0);
     if (!parsed || typeof parsed !== 'object') return base;
     const out = { ...base };
     for (const id of ids) {

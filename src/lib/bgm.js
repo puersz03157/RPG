@@ -1,10 +1,12 @@
 const TRACKS = {
-  menu: '/bgm/the_morning_gate.mp3',
-  battle: '/bgm/sprint_through_the_thicket.mp3',
-  boss: '/bgm/forge_of_defiance.mp3',
-  gacha: '/bgm/gilded_arrival.mp3',
-  victory: '/bgm/the_path_opens.mp3',
-  defeat: '/bgm/the_slow_return_to_light.mp3',
+  // Use relative paths so GitHub Pages (base './') works.
+  menu: './bgm/the_morning_gate.mp3',
+  shop: './bgm/the_antiquarian_s_grace.mp3',
+  battle: './bgm/sprint_through_the_thicket.mp3',
+  boss: './bgm/forge_of_defiance.mp3',
+  gacha: './bgm/gilded_arrival.mp3',
+  victory: './bgm/the_path_opens.mp3',
+  defeat: './bgm/the_slow_return_to_light.mp3',
 };
 
 function clamp01(n) {

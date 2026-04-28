@@ -50,187 +50,233 @@ export const TALENT_ROW4_OPTIONS = [
 
 /** 第 3 列：角色專屬被動 */
 export const TALENT_ROW3_BY_HERO = {
-  h1: {
+  Puersz: {
     title: '普爾斯專屬',
     options: [
       {
-        id: 'h1_burnSplashPlus',
+        id: 'Puersz_burnSplashPlus',
         name: '燎原擴散',
         description: '「燎原勢」濺射傷害提高（濺射倍率 +0.15）。',
-        effect: { type: 'skillSplashMulAdd', skillId: 'h1-3', add: 0.15 },
+        effect: { type: 'skillSplashMulAdd', skillId: 'Puersz-3', add: 0.15 },
       },
       {
-        id: 'h1_killMp',
+        id: 'Puersz_killMp',
         name: '焰返',
         description: '擊殺敵人時回復 8 MP。',
         effect: { type: 'onKillMp', value: 8 },
       },
       {
-        id: 'h1_skillCritArcane',
+        id: 'Puersz_skillCritArcane',
         name: '術式暴擊',
         description: '魔攻／複合技能可以暴擊（沿用既有暴擊率／暴擊傷害）。',
         effect: { type: 'skillCritEnable', scales: ['matk', 'mix'] },
       },
     ],
   },
-  h2: {
+  xiongji: {
     title: '熊吉專屬',
     options: [
       {
-        id: 'h2_seenDamage',
+        id: 'xiongji_seenDamage',
         name: '看破追擊',
         description: '對「看破」的敵人造成的傷害提高 12%。',
         effect: { type: 'dmgVsWeaknessSeenMul', mul: 1.12 },
       },
       {
-        id: 'h2_buffPlus',
+        id: 'xiongji_buffPlus',
         name: '聲援餘韻',
         description: '由自己施放的強化效果持續回合 +1。',
         effect: { type: 'buffTurnsPlus', value: 1 },
       },
       {
-        id: 'h2_turnMpSmall',
+        id: 'xiongji_turnMpSmall',
         name: '乘風回氣＋',
         description: '輪到自己行動時，額外回復 3 MP。',
         effect: { type: 'turnStartMp', value: 3 },
       },
     ],
   },
-  h3: {
+  baize: {
     title: '白澤專屬',
     options: [
       {
-        id: 'h3_startTaunt',
+        id: 'baize_startTaunt',
         name: '不動之姿',
         description: '戰鬥開始時進入嘲諷（3 回合）。',
         effect: { type: 'battleStartTaunt', turns: 3 },
       },
       {
-        id: 'h3_shieldDouble',
+        id: 'baize_shieldDouble',
         name: '重壁',
         description: '「守護盾」護盾次數 +1（變成 2 次）。',
-        effect: { type: 'barrierTurnsPlus', skillId: 'h3-1', value: 1 },
+        effect: { type: 'barrierTurnsPlus', skillId: 'baize-1', value: 1 },
       },
       {
-        id: 'h3_barrierBreakMp',
+        id: 'baize_barrierBreakMp',
         name: '護盾回流',
         description: '「守護盾」賦予的護盾被擊破時，回復該角色 10 MP。',
-        effect: { type: 'barrierBreakMp', skillId: 'h3-1', value: 10 },
+        effect: { type: 'barrierBreakMp', skillId: 'baize-1', value: 10 },
       },
     ],
   },
-  h4: {
+  butiya: {
     title: '布提婭專屬',
     options: [
       {
-        id: 'h4_darkGravity',
+        id: 'butiya_darkGravity',
         name: '暗引沉影',
         description: '「暗引力」命中後附加黑暗（2 回合）。',
-        effect: { type: 'skillOnHitAilment', skillId: 'h4-1', ailment: { type: 'darkness', turns: 2 } },
+        effect: { type: 'skillOnHitAilment', skillId: 'butiya-1', ailment: { type: 'darkness', turns: 2 } },
       },
       {
-        id: 'h4_slowMpDouble',
+        id: 'butiya_slowMpDouble',
         name: '遲滯回氣',
         description: '攻擊被降低速度的敵人時，自己的 MP 回復加倍。',
         effect: { type: 'selfMpGainMulWhenAttackingSlowedTarget', mul: 2 },
       },
       {
-        id: 'h4_starfallMdefDown',
+        id: 'butiya_starfallMdefDown',
         name: '星隕裂抗',
         description: '「星隕」命中後附加敵方全體魔抗降低（小，2 回合）。',
-        effect: { type: 'skillOnHitMdefDownAll', skillId: 'h4-4', mul: 0.9, turns: 2 },
+        effect: { type: 'skillOnHitMdefDownAll', skillId: 'butiya-4', mul: 0.9, turns: 2 },
       },
     ],
   },
-  h6: {
+  bubu: {
+    title: '布布專屬',
+    options: [
+      {
+        id: 'bubu_healMul',
+        name: '治療強化',
+        description: '治療量提高 15%。',
+        effect: { type: 'healMul', mul: 1.15 },
+      },
+      {
+        id: 'bubu_chainBless',
+        name: '連環祝福',
+        description: '治療單體目標時，50% 機率再治療另一名存活隊友（治療量為本次的 40%）。',
+        effect: { type: 'chainHealOnHeal', chance: 0.5, ratio: 0.4 },
+      },
+      {
+        id: 'bubu_guardCycle',
+        name: '守護循環',
+        description: '我方角色受到直接傷害時，布布回復 2 MP（每回合最多觸發 3 次；DOT 不算）。',
+        effect: { type: 'mpOnAllyDirectDamage', mp: 2, perTurnCap: 3 },
+      },
+    ],
+  },
+  butiya_halloween: {
     title: '萬聖節布提婭專屬',
     options: [
       {
-        id: 'h6_darkGravity',
-        name: '暗引沉影',
-        description: '「暗引力」命中後附加黑暗（2 回合）。',
-        effect: { type: 'skillOnHitAilment', skillId: 'h6-1', ailment: { type: 'darkness', turns: 2 } },
+        id: 'butiya_halloween_mpOnHitByAilmentedEnemy',
+        name: '詛咒反饋',
+        description: '受到持有異常狀態的敵人攻擊時，回復 5 MP（每回合最多 2 次）。',
+        effect: { type: 'mpOnHitByAilmentedEnemy', mp: 5, perTurnCap: 2 },
       },
       {
-        id: 'h6_slowMpDouble',
-        name: '遲滯回氣',
-        description: '攻擊被降低速度的敵人時，自己的 MP 回復加倍。',
-        effect: { type: 'selfMpGainMulWhenAttackingSlowedTarget', mul: 2 },
+        id: 'butiya_halloween_doubleDot',
+        name: '疫焰加倍',
+        description: '自身賦予敵人的 DOT 傷害加倍。',
+        effect: { type: 'doubleDotFromSelf' },
       },
       {
-        id: 'h6_starfallMdefDown',
-        name: '星隕裂抗',
-        description: '「星隕」命中後附加敵方全體魔抗降低（小，2 回合）。',
-        effect: { type: 'skillOnHitMdefDownAll', skillId: 'h6-4', mul: 0.9, turns: 2 },
+        id: 'butiya_halloween_onKillSpd',
+        name: '搗蛋疾走',
+        description: '擊殺敵人時，自身獲得加速（2 回合）。',
+        effect: { type: 'onKillSpdBuff', turns: 2, mul: 1.12 },
       },
     ],
   },
-  h7: {
+  bubu_harvest: {
     title: '豐收節布布專屬',
     options: [
       {
-        id: 'h7_seenDamage',
-        name: '看破追擊',
-        description: '對「看破」的敵人造成的傷害提高 12%。',
-        effect: { type: 'dmgVsWeaknessSeenMul', mul: 1.12 },
+        id: 'bubu_harvest_sunflowerVsStunImmune',
+        name: '葵花子追擊',
+        description: '「葵花子射擊」對處於暈眩免疫的敵人造成的傷害提高 15%。',
+        effect: { type: 'skillDmgVsStunImmuneMul', skillId: 'bubu_harvest-1', mul: 1.15 },
       },
       {
-        id: 'h7_buffPlus',
-        name: '恩澤餘韻',
-        description: '由自己施放的強化效果持續回合 +1。',
-        effect: { type: 'buffTurnsPlus', value: 1 },
+        id: 'bubu_harvest_sunbeamStunUp',
+        name: '日芒鎖定',
+        description: '「太陽光束」暈眩機率提高 5%。',
+        effect: { type: 'skillAilmentChanceAdd', skillId: 'bubu_harvest-2', ailmentType: 'stun', add: 0.05 },
       },
       {
-        id: 'h7_turnMpSmall',
-        name: '金穗回氣',
-        description: '輪到自己行動時，額外回復 3 MP。',
-        effect: { type: 'turnStartMp', value: 3 },
+        id: 'bubu_harvest_healGivesMp',
+        name: '療癒充能',
+        description: '治療隊友時，額外使該目標回復 10 MP。',
+        effect: { type: 'healTargetMpFlat', mp: 10 },
       },
     ],
   },
-  h8: {
+  moying: {
     title: '墨影專屬',
     options: [
       {
-        id: 'h8_darkGravity',
+        id: 'moying_critLifesteal',
         name: '爆擊吸血',
         description: '自身造成暴擊傷害時，回復等同於該次暴擊傷害 25% 的 HP。',
         effect: { type: 'critLifesteal', mul: 0.25 },
       },
       {
-        id: 'h8_slowMpDouble',
+        id: 'moying_onKillAtkBuff',
         name: '擊殺 + 攻擊',
         description: '擊殺敵人時，獲得攻擊提升（小，3 回合）。同回合多次擊殺可疊加。',
         effect: { type: 'onKillAtkBuff', mul: 1.08, turns: 3 },
       },
       {
-        id: 'h8_starfallMdefDown',
+        id: 'moying_multiHit',
         name: '夜戮・三連斬',
         description: '「夜戮」變為 48% 威力的 3 連擊（每擊各自判定暴擊）。',
-        effect: { type: 'skillMultiHitOverride', skillId: 'h8-4', powerMul: 0.48, hits: 3 },
+        effect: { type: 'skillMultiHitOverride', skillId: 'moying-4', powerMul: 0.48, hits: 3 },
       },
     ],
   },
-  h9: {
-    title: '怪盜風專屬',
+  jack: {
+    title: '傑克專屬',
     options: [
       {
-        id: 'h9_seenDamage',
-        name: '怪盜風・開幕眩術',
+        id: 'jack_openingDazzle',
+        name: '開幕眩術',
         description: '戰鬥開始時對敵方全體附加眩目（2 回合）。',
         effect: { type: 'battleStartDazzleAllEnemies', turns: 2 },
       },
       {
-        id: 'h9_buffPlus',
-        name: '怪盜風・掠光竊印',
+        id: 'jack_critSteal',
+        name: '掠光竊印',
         description: '自身造成暴擊時，竊取敵方一個隨機增益（轉移到自己身上）。',
         effect: { type: 'critStealRandomBuffFromEnemy' },
       },
       {
-        id: 'h9_turnMpSmall',
-        name: '怪盜風・贈禮充能',
+        id: 'jack_allyMpOnBuff',
+        name: '贈禮充能',
         description: '自身對隊友施加增益時，該名隊友回復 5 MP（不含自己）。',
         effect: { type: 'allyMpOnBuffFromSelf', mp: 5 },
+      },
+    ],
+  },
+  huji: {
+    title: '虎吉專屬',
+    options: [
+      {
+        id: 'huji_startTaunt',
+        name: '山林王者',
+        description: '戰鬥開始時進入嘲諷（2 回合）。',
+        effect: { type: 'battleStartTaunt', turns: 2 },
+      },
+      {
+        id: 'huji_pounceStunUp',
+        name: '獵勢定身',
+        description: '「猛虎撲殺」暈眩機率提高 10%。',
+        effect: { type: 'skillAilmentChanceAdd', skillId: 'huji-3', ailmentType: 'stun', add: 0.1 },
+      },
+      {
+        id: 'huji_incomingHeal',
+        name: '野性恢復',
+        description: '自身受到的治療量提高 15%。',
+        effect: { type: 'incomingHealMul', mul: 1.15 },
       },
     ],
   },

@@ -37,11 +37,16 @@ export function buildBattleHeroesWithAura(roster, captainId) {
     let incomingDmgMul = 1;
     let captainCritRateAdd = 0;
     let captainDmgVsDazzledMul = 1;
+    let captainDmgVsStunnedOrImmuneMul = 1;
 
     if (effect) {
       switch (effect.type) {
         case 'allyDmgVsDazzledEnemyMul':
           captainDmgVsDazzledMul =
+            typeof effect.value === 'number' && effect.value > 1 ? Math.min(2, effect.value) : 1;
+          break;
+        case 'allyDmgVsStunnedOrImmuneMul':
+          captainDmgVsStunnedOrImmuneMul =
             typeof effect.value === 'number' && effect.value > 1 ? Math.min(2, effect.value) : 1;
           break;
         case 'allyCritRateAdd':
@@ -82,6 +87,7 @@ export function buildBattleHeroesWithAura(roster, captainId) {
       spd,
       captainCritRateAdd,
       captainDmgVsDazzledMul,
+      captainDmgVsStunnedOrImmuneMul,
       curHp: u.hp,
       curMp: 100,
       av: 10000 / spd,

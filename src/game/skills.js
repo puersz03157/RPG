@@ -4,6 +4,8 @@ export function getSkillTargeting(skill) {
   const effect = skill?.effect;
   if (!effect) return { requiresTarget: true, side: 'enemy', mode: 'single' };
 
+  if (effect.type === 'sunflowerShot') return { requiresTarget: true, side: 'both', mode: 'single' };
+  if (effect.type === 'halloweenTrickOrTreat') return { requiresTarget: false, side: 'ally', mode: 'all' };
   if (effect.type === 'observeCheer') return { requiresTarget: false, side: 'ally', mode: 'all' };
   if (effect.type === 'jackPhantomDrawAll') return { requiresTarget: false, side: 'ally', mode: 'all' };
   if (effect.type === 'cleanseOne' && effect.target === 'ally-all') return { requiresTarget: false, side: 'ally', mode: 'all' };
@@ -108,6 +110,7 @@ export function getBuffAllDef(skill) {
   const mul = typeof effect.mul === 'number' ? effect.mul : 1;
   if (effect.stat === 'atk+matk') return { kind: 'atkMatk', turns, mulAtk: mul, mulMatk: mul };
   if (effect.stat === 'atk') return { kind: 'atk', turns, mulAtk: mul, mulMatk: 1 };
+  if (effect.stat === 'matk') return { kind: 'matk', turns, mulMatk: mul };
   if (effect.stat === 'spd') return { kind: 'spd', turns, mulSpd: mul };
   return null;
 }

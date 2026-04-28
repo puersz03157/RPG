@@ -5,6 +5,9 @@ import {
   RotateCcw,
   Play,
   Store,
+  Hammer,
+  Dumbbell,
+  Utensils,
   Heart,
   Flame,
   Droplets,
@@ -27,11 +30,16 @@ import {
   Calendar,
   Trophy,
   ListTodo,
+  Sprout,
 } from 'lucide-react';
 import { HEROES_BASE, MONSTERS_BASE, STAGES, CHAPTERS } from './data/units.js';
+import { mapHeroId } from './data/heroIdMap.js';
 import { LOBBY_GREETINGS, LOBBY_DEFAULT_GREETINGS } from './data/lobbyGreetings.js';
+import { LOBBY_BACKGROUNDS, getLobbyBackgroundById } from './data/lobbyBackgrounds.js';
+import { loadLobbyBgId, saveLobbyBgId, clearLobbyBgStorage } from './lib/lobbyBgStorage.js';
+import { getInitialLobbyHeroId, saveLobbyHeroId, clearLobbyHeroStorage } from './lib/lobbyHeroStorage.js';
 import { getSkillsForHero } from './data/heroSkills.js';
-import { getMonsterSkillSet, monsterTemplateId } from './data/monsterSkills.js';
+import { getMonsterSkillSet, monsterTemplateId, isLavaCoreTemplateId, isLavaGiantTemplateId } from './data/monsterSkills.js';
 import { loadPartyIds, savePartyIds, clearPartyStorage, MIN_PARTY, MAX_PARTY } from './lib/partyStorage.js';
 import {
   loadHeroXpMap,
@@ -59,6 +67,8 @@ import {
   STAR_WISH_CHAR_RATE,
   STAR_WISH_HERO_IDS,
   STAR_WISH_HERO_ORDER,
+  STAR_WISH_JUNK_TABLE,
+  STAR_WISH_JUNK_WEIGHT_SUM,
   getStarWishDirectPrice,
   rollStarWishJunkReward,
 } from './data/starWish.js';
@@ -68,6 +78,13 @@ import { consumeGoldStageRun, getGoldStageRunsLeft, clearGoldStageEntryStorage, 
 import { loadMusicSettings, saveMusicSettings, clearMusicStorage } from './lib/musicStorage.js';
 import { BGM } from './lib/bgm.js';
 import {
+  loadDailyQuestsState,
+  saveDailyQuestsState,
+  DAILY_QUEST_DEFS,
+  DAILY_QUEST_IDS,
+  clearDailyQuestsStorage,
+} from './lib/dailyQuestsStorage.js';
+import {
   loadAllHeroesUnlocked,
   saveAllHeroesUnlocked,
   loadUnlockedHeroIds,
@@ -76,18 +93,17 @@ import {
 } from './lib/heroUnlockStorage.js';
 import { loadCompletedStageIds, saveCompletedStageIds, clearStageProgressStorage } from './lib/stageProgressStorage.js';
 import { loadBossLootClaims, saveBossLootClaims, clearBossLootStorage } from './lib/bossLootStorage.js';
-import { loadTalentMap, saveTalentMap } from './lib/talentStorage.js';
-import {
-  loadHeroEquipMap,
-  saveHeroEquipMap,
-  clearHeroEquipStorage,
-  defaultEquip,
-  applyEquipmentToHero,
-  getEquipSummary,
-  getEquipStatBonus,
-} from './lib/equipmentStorage.js';
+import { loadTalentMap, saveTalentMap, clearTalentStorage } from './lib/talentStorage.js';
+import { applyEquipmentToHero, getEquipSummary, getEquipStatBonus, clearHeroEquipStorage } from './lib/equipmentStorage.js';
+import { migrateEquipToInstancesIfNeeded, loadHeroEquipMapV2, saveHeroEquipMapV2 } from './lib/equipInstanceStorage.js';
+import { loadSkillMasteryMap, saveSkillMasteryMap, incSkillUses, setSkillMasteryBranch, clearSkillMasteryStorage } from './lib/skillMasteryStorage.js';
+import { getMasteryRank, MASTERY_USES_PER_RANK, getSkillMpDiscountFromMastery, getSkillPowerMulFromMastery } from './game/skillMastery.js';
+import { loadBondMap, saveBondMap, addBondPoints, getBondPoints, getBondLevel } from './lib/bondStorage.js';
+import { rollAffixesForEquip, sumAffixStats } from './lib/equipAffixes.js';
+import { getForgeLevelFromInventory } from './lib/baseProgress.js';
 import { EQUIP_SLOTS, listEquipBySlot, getEquipItem, EQUIPMENT_CATALOG, getEquipSellPrice } from './data/equipment.js';
 import { ITEM_CATALOG, getItem, getItemSellPrice, getItemMaxStack, canUseInBattle } from './data/items.js';
+import { isBackpackIngredientId, isBackpackForgeId } from './data/backpackCategories.js';
 import {
   loadEquipInventory,
   saveEquipInventory,
@@ -100,6 +116,13 @@ import {
   incInv,
   incEquipInv,
 } from './lib/inventoryStorage.js';
+import { loadGardenPlots, saveGardenPlots, clearGardenPlotsStorage } from './lib/gardenPlotsStorage.js';
+import { loadFishCodex, saveFishCodex, clearFishCodexStorage } from './lib/fishCodexStorage.js';
+import { clearMiningDailyStorage } from './lib/miningDailyStorage.js';
+import { clearHuntingDailyStorage } from './lib/huntingDailyStorage.js';
+import { CAMP_RECIPES, getCampRecipe } from './data/campRecipes.js';
+import { loadCampRecipeOwnedIds, saveCampRecipeOwnedIds, clearCampRecipeStorage } from './lib/campRecipeStorage.js';
+import GardenPanel from './components/GardenPanel.jsx';
 import {
   buildBattleHeroesWithAura,
   getCaptainPassiveDef,
@@ -133,6 +156,7 @@ import {
 import { getMainQuestPointer } from './game/mainQuest.js';
 import { getWeaknessRevealLabel } from './game/weaknessReveal.js';
 import { TALENT_ROWS, TALENT_ROW4_OPTIONS } from './data/talents.js';
+import { COMBO_SKILL_DEFS, validateComboDefs } from './data/comboSkills.js';
 import {
   applyTalentStatsToUnit,
   getBuffTurnsBonusFromTalents,
@@ -142,6 +166,16 @@ import {
   getBattleStartDazzleAllTurnsFromTalents,
   getAllyMpOnBuffFromSelfFromTalents,
   getDamageMulFromTalents,
+  getOutgoingHealMulFromTalents,
+  getIncomingHealMulFromTalents,
+  getChainHealOnHealFromTalents,
+  getMpOnAllyDirectDamageFromTalents,
+  getSkillDamageMulVsStunImmuneFromTalents,
+  getSkillAilmentChanceAddFromTalents,
+  getHealTargetMpFlatFromTalents,
+  getMpOnHitByAilmentedEnemyFromTalents,
+  hasDoubleDotFromSelfTalent,
+  getOnKillSpdBuffFromTalents,
   getExtraTurnStartMpFromTalents,
   getOnKillMpFromTalents,
   getCritLifestealMulFromTalents,
@@ -159,6 +193,7 @@ import {
   loadTalentRow4Progress,
   saveTalentRow4Progress,
   TALENT_R4_LEVEL_MAX,
+  clearTalentRow4ProgressStorage,
 } from './lib/talentRow4ProgressStorage.js';
 import {
   canPhysicalCrit,
@@ -173,6 +208,8 @@ import {
   applyPoisonOnTarget,
   applyDarknessOnTarget,
   applyDazzleOnTarget,
+  applyStunOnTarget,
+  STUN_IMMUNE_TURNS_AFTER,
   defaultAilmentFields,
   getDarknessDamageMul,
   getIncomingHealMulFromPoison,
@@ -181,7 +218,18 @@ import {
 import CmdBtn from './components/CmdBtn.jsx';
 import NavBtn from './components/NavBtn.jsx';
 import HeroAvatar from './components/HeroAvatar.jsx';
+import LobbyHeroStage from './components/LobbyHeroStage.jsx';
 import { StoryMechanismQte } from './components/StoryMechanismQte.jsx';
+
+function getStarWishJunkRowLabel(row) {
+  if (row.kind === 'gold') return `金幣 +${row.amount}`;
+  if (row.kind === 'r4crystal') return `天賦碎晶 +${row.amount}`;
+  if (row.kind === 'item' && row.itemId) {
+    const it = getItem(row.itemId);
+    return it?.name ? `${it.name} ×${row.amount}` : String(row.itemId);
+  }
+  return '—';
+}
 
 export default function App() {
   const MP_MAX = 100;
@@ -223,8 +271,11 @@ export default function App() {
   const [starCrystals, setStarCrystals] = useState(() => loadStarCrystalBalance());
   const [starWishDiscountPulls, setStarWishDiscountPulls] = useState(() => loadStarWishState().discountPulls);
   const [starWishLastMsg, setStarWishLastMsg] = useState('');
-  /** 祈願結果圖像用：'hero' | 'gold' | null */
+  /** 星曉祈願結果圖像用：'hero' | 'gold' | null */
   const [starWishRewardPreview, setStarWishRewardPreview] = useState(null);
+  const [starWishOddsOpen, setStarWishOddsOpen] = useState(false);
+  /** 星曉祈願介面分頁：星曉限定 | 佔位 */
+  const [recruitWishTab, setRecruitWishTab] = useState('limited');
   const [talentR4Prog, setTalentR4Prog] = useState(() => loadTalentRow4Progress());
   const [victoryLootLine, setVictoryLootLine] = useState('');
   const [victoryXpFootnote, setVictoryXpFootnote] = useState('');
@@ -238,19 +289,32 @@ export default function App() {
   const [storyLineIdx, setStoryLineIdx] = useState(0);
   const [useItemTargetPick, setUseItemTargetPick] = useState(null); // { itemId, maxLevel, amount }
   const [gold, setGold] = useState(() => loadGold());
-  const [heroEquipMap, setHeroEquipMap] = useState(() => loadHeroEquipMap());
+  const EQUIP_INSTANCE_CAP = 50;
+  const migrated0 = migrateEquipToInstancesIfNeeded();
+  const [equipInstances, setEquipInstances] = useState(() => migrated0.instances ?? []);
+  const [heroEquipV2, setHeroEquipV2] = useState(() => migrated0.heroEquipV2 ?? loadHeroEquipMapV2());
+  const [facilityNpcTalkIdx, setFacilityNpcTalkIdx] = useState({ forge: 0, training: 0, camp: 0, garden: 0 });
+  const [backpackTab, setBackpackTab] = useState('items'); // items | ingredients | forge | equip
+  const [skillMasteryMap, setSkillMasteryMap] = useState(() => loadSkillMasteryMap());
+  const [bondMap, setBondMap] = useState(() => loadBondMap());
+  // legacy (no longer used after switching to instances)
+  const [equipAffixMap, setEquipAffixMap] = useState(() => ({}));
   const [talentMap, setTalentMap] = useState(() => loadTalentMap());
   const [equipModalHeroId, setEquipModalHeroId] = useState(null);
   const [shopMode, setShopMode] = useState('buy-item'); // buy-equip | sell-equip | buy-item | sell-item
   const [shopDialog, setShopDialog] = useState('「歡迎光臨。想買點什麼，或是把不要的東西賣掉？」');
+  // legacy equipInv (count-based) kept for backward compatibility, but not used after migration
   const [equipInv, setEquipInv] = useState(() => loadEquipInventory());
   const [itemInv, setItemInv] = useState(() => loadItemInventory());
+  const [gardenPlots, setGardenPlots] = useState(() => loadGardenPlots());
+  const [fishCodex, setFishCodex] = useState(() => loadFishCodex());
   const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [sfxEnabled, setSfxEnabledState] = useState(() => loadSfxSettings().enabled);
   const [sfxVolume, setSfxVolumeState] = useState(() => loadSfxSettings().volume);
   const [musicEnabled, setMusicEnabledState] = useState(() => loadMusicSettings().enabled);
   const [musicVolume, setMusicVolumeState] = useState(() => loadMusicSettings().volume);
+  const [dailyQ, setDailyQ] = useState(() => loadDailyQuestsState());
   const [redeemCode, setRedeemCode] = useState('');
   const [redeemMsg, setRedeemMsg] = useState('');
   const [allHeroesUnlocked, setAllHeroesUnlocked] = useState(() => loadAllHeroesUnlocked());
@@ -260,10 +324,62 @@ export default function App() {
   const [resetConfirmInput, setResetConfirmInput] = useState('');
   const [resetConfirmError, setResetConfirmError] = useState('');
   const [heroInfo, setHeroInfo] = useState(null); // { heroId }
-  const [lobbyHeroId, setLobbyHeroId] = useState(() => partyIds[0] ?? 'h1');
-  const [lobbyPanelModal, setLobbyPanelModal] = useState(null); // 'daily' | 'achievements' | null
+  const [lobbyHeroId, setLobbyHeroId] = useState(() => getInitialLobbyHeroId());
+  const [lobbyPanelModal, setLobbyPanelModal] = useState(null); // 'daily' | 'achievements' | 'recruit' | 'forge' | 'training' | 'camp'(餐酒館) | 'garden' | 'lobbyBg' | null
   const [lobbyNotice, setLobbyNotice] = useState('');
   const [lobbyBubble, setLobbyBubble] = useState({ text: '', tick: 0 });
+  const [lobbyBgId, setLobbyBgId] = useState(() => loadLobbyBgId());
+  const [lobbyBgImgVisible, setLobbyBgImgVisible] = useState(false);
+  const chapterIdByStageId = useMemo(() => {
+    const map = {};
+    for (const ch of CHAPTERS ?? []) {
+      for (const sid of ch?.stages ?? []) map[sid] = ch.id;
+    }
+    return map;
+  }, []);
+
+  const chapterBgIdMap = useMemo(
+    () => ({
+      'ch-0': 'ximu_cun',
+      'ch-1': 'cuiying_linhai',
+      'ch-2': 'shuangzhu_binghe',
+      'ch-3': 'xingjie_gang',
+      'ch-4': 'yanji_volcano',
+      'ch-5': 'xingzhui_yiji',
+      // ch-6 黯潮深淵：目前缺圖，先 fallback 使用者選的背景
+      // ch-7 終幕試煉：沿用使用者選的背景（看你之後要不要做專屬圖）
+    }),
+    [],
+  );
+
+  const sceneBgId = useMemo(() => {
+    if (scene === 'lobby') return lobbyBgId;
+    if (scene === 'story') {
+      const ch = storyStageId ? chapterIdByStageId?.[storyStageId] : null;
+      return (ch && chapterBgIdMap?.[ch]) || lobbyBgId;
+    }
+    if (scene === 'battle') {
+      const ch = selectedStageId ? chapterIdByStageId?.[selectedStageId] : null;
+      return (ch && chapterBgIdMap?.[ch]) || lobbyBgId;
+    }
+    return lobbyBgId;
+  }, [scene, lobbyBgId, selectedStageId, storyStageId, chapterIdByStageId, chapterBgIdMap]);
+
+  const lobbyBgDef = useMemo(() => getLobbyBackgroundById(sceneBgId), [sceneBgId]);
+
+  const [forgePick, setForgePick] = useState({ heroId: null, slotKey: 'weapon', forcedStat: null });
+  const [trainingPick, setTrainingPick] = useState({ heroId: null, skillId: null });
+  const [campDishId, setCampDishId] = useState(null);
+  const [campBuff, setCampBuff] = useState(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      return JSON.parse(window.localStorage.getItem('aethelgard-camp-buff-v1') || 'null');
+    } catch {
+      return null;
+    }
+  });
+  const [campTab, setCampTab] = useState('menu'); // menu | recipes | custom
+  const [campOwnedRecipeIds, setCampOwnedRecipeIds] = useState(() => loadCampRecipeOwnedIds());
   const longPressTimerRef = useRef(null);
   const longPressFiredRef = useRef(false);
   const passiveLongPressTimerRef = useRef(null);
@@ -302,19 +418,19 @@ export default function App() {
 
   useEffect(() => {
     if (allHeroesUnlocked) return;
-    const must = 'h1';
+    const must = 'Puersz';
     if ((unlockedHeroIds ?? []).length > 0) return;
     if (partyIds.length !== 1 || partyIds[0] !== must) setPartyIds([must]);
   }, [allHeroesUnlocked, unlockedHeroIds, partyIds]);
 
   const isHeroUnlocked = (heroId) => {
-    if (heroId === 'h1') return true;
+    if (heroId === 'Puersz') return true;
     if (allHeroesUnlocked) return true;
     return (unlockedHeroIds ?? []).includes(heroId);
   };
 
   const unlockHero = useCallback((heroId) => {
-    if (!heroId || heroId === 'h1') return;
+    if (!heroId || heroId === 'Puersz') return;
     setUnlockedHeroIds((prev) => (prev?.includes(heroId) ? prev : [...(prev ?? []), heroId]));
   }, []);
 
@@ -336,8 +452,8 @@ export default function App() {
 
   // r4 progress share key (skins share unlock/level)
   const getR4ShareKey = (heroId) => {
-    if (heroId === 'h6') return 'h4'; // 萬聖節布提婭 → 布提婭
-    if (heroId === 'h7') return 'h2'; // 豐收節布布 → 熊吉
+    if (heroId === 'butiya_halloween') return 'butiya'; // 萬聖節布提婭 → 布提婭
+    if (heroId === 'bubu_harvest') return 'xiongji'; // 豐收節布布 → 熊吉
     return heroId;
   };
 
@@ -407,7 +523,53 @@ export default function App() {
   const getSkillMpCostForCaster = (skill, caster) => {
     const base = skill?.mpCost ?? 0;
     if (!caster?.isHero) return base;
-    return Math.max(1, base - getR4SkillMpDiscount(caster.id));
+    const r4 = getR4SkillMpDiscount(caster.id);
+    const m = skill?.id ? getSkillMpDiscountFromMastery(skillMasteryMap, caster.id, skill.id) : 0;
+    return Math.max(1, base - r4 - m);
+  };
+
+  // 合體技：資料表驅動（每位英雄最多 2 夥伴、每對 1 招）
+  useEffect(() => {
+    const v = validateComboDefs(COMBO_SKILL_DEFS);
+    if (!v.ok) {
+      // eslint-disable-next-line no-console
+      console.warn('[daily] combo defs violate constraints', v);
+    }
+  }, []);
+
+  const getComboSkillsForHero = (hero) => {
+    if (!hero?.isHero) return [];
+    if (!(partyIds ?? []).includes(hero.id)) return [];
+    const out = [];
+    for (const def of COMBO_SKILL_DEFS) {
+      if (!def) continue;
+      const a = def.a;
+      const b = def.b;
+      const isA = hero.id === a;
+      const isB = hero.id === b;
+      if (!isA && !isB) continue;
+      const partnerId = isA ? b : a;
+      if (!(partyIds ?? []).includes(partnerId)) continue;
+
+      const lv = getBondLevel(getBondPoints(bondMap, hero.id, partnerId));
+      if (lv < (def.requiredBondLv ?? 2)) continue;
+
+      // 夥伴需存活（戰鬥中才有 curHp；非戰鬥狀態直接允許顯示）
+      const partnerUnit = (heroes ?? []).find((h) => h.id === partnerId);
+      if (partnerUnit && (partnerUnit.curHp ?? 0) <= 0) continue;
+
+      const s = def.skill;
+      // 允許先登記組合、晚點再補技能：沒技能就不加入戰鬥技能清單
+      if (!s?.id) continue;
+      out.push({ ...s, combo: { partnerId, bondLevel: lv } });
+    }
+    return out;
+  };
+
+  const getBattleSkillsForHero = (hero) => {
+    const base = getSkillsForHero(hero) ?? [];
+    const combo = getComboSkillsForHero(hero);
+    return [...base, ...combo];
   };
 
   const stealRandomBuffFromMonsterToHero = ({ heroId, monsterId, monstersList }) => {
@@ -476,16 +638,13 @@ export default function App() {
       setStarWishLastMsg('通關第五章尾聲後開放「星曉祈願」。');
       return;
     }
-    if (remainingWishHeroIds.length === 0) {
-      setStarWishLastMsg('本期祈願角色已全部加入。');
-      return;
-    }
     if (starCrystals < STAR_WISH_PULL_COST) {
       setStarWishLastMsg(`星曉晶石不足（需要 ${STAR_WISH_PULL_COST}）。`);
       return;
     }
     setStarCrystals((c) => c - STAR_WISH_PULL_COST);
-    const hitChar = Math.random() < STAR_WISH_CHAR_RATE && remainingWishHeroIds.length > 0;
+    const nWishLeft = remainingWishHeroIds.length;
+    const hitChar = nWishLeft > 0 && Math.random() < STAR_WISH_CHAR_RATE;
     if (hitChar) {
       const pick = remainingWishHeroIds[Math.floor(Math.random() * remainingWishHeroIds.length)];
       unlockHero(pick);
@@ -494,22 +653,40 @@ export default function App() {
       SFX.skill();
       const nm = HEROES_BASE.find((h) => h.id === pick)?.name ?? pick;
       setStarWishRewardPreview({ type: 'hero', heroId: pick });
-      setStarWishLastMsg(`祈願邂逅：獲得「${nm}」！直購價格已重置。`);
+      setStarWishLastMsg(`星曉祈願邂逅：獲得「${nm}」！直購價格已重置。`);
       return;
     }
     const junk = rollStarWishJunkReward();
-    setStarWishDiscountPulls((p) => p + 1);
+    if (nWishLeft > 0) setStarWishDiscountPulls((p) => p + 1);
     unlockAudio();
     SFX.uiClick();
-    const g = Math.max(0, Math.floor(junk.amount ?? 0));
+    const allWishOwned = nWishLeft === 0;
+    const pullNote = allWishOwned ? '' : '（未邂逅到限定角，直購價格已降低）';
     if (junk.kind === 'r4crystal') {
+      const g = Math.max(0, Math.floor(junk.amount ?? 0));
       if (g > 0) setTalentR4Prog((s) => ({ ...(s ?? {}), crystals: Math.max(0, (s?.crystals ?? 0) + g), byHero: s?.byHero ?? {} }));
       setStarWishRewardPreview({ type: 'r4crystal', amount: g });
-      setStarWishLastMsg(`獲得天賦碎晶 +${g}。（可用於解鎖/升級「碎晶列」；未邂逅角色，直購價格已降低）`);
+      setStarWishLastMsg(
+        allWishOwned
+          ? `獲得天賦碎晶 +${g}。（可用於解鎖/升級「碎晶列」）`
+          : `獲得天賦碎晶 +${g}。（可用於解鎖/升級「碎晶列」；未邂逅到限定角，直購價格已降低）`
+      );
+    } else if (junk.kind === 'item' && junk.itemId) {
+      const n = Math.max(1, Math.floor(junk.amount ?? 1));
+      const itemId = junk.itemId;
+      setItemInv((inv) => incInv(inv, itemId, n));
+      const it = getItem(itemId);
+      setStarWishRewardPreview({ type: 'item', itemId, amount: n });
+      setStarWishLastMsg(
+        allWishOwned
+          ? `獲得「${it?.name ?? itemId}」×${n}。`
+          : `獲得「${it?.name ?? itemId}」×${n}。${pullNote}`
+      );
     } else {
+      const g = Math.max(0, Math.floor(junk.amount ?? 0));
       if (g > 0) setGold((x) => x + g);
       setStarWishRewardPreview({ type: 'gold', amount: g });
-      setStarWishLastMsg(`獲得金幣 +${g}。（未邂逅角色，直購價格已降低）`);
+      setStarWishLastMsg(allWishOwned ? `獲得金幣 +${g}。` : `獲得金幣 +${g}。${pullNote}`);
     }
   }, [remainingWishHeroIds, starCrystals, unlockHero, isStarWishUnlocked]);
 
@@ -560,6 +737,8 @@ export default function App() {
     if (chapterId === 'ch-3') return isStageCompleted('c2-epilogue');
     if (chapterId === 'ch-4') return isStageCompleted('c3-epilogue');
     if (chapterId === 'ch-5') return isStageCompleted('c4-epilogue');
+    if (chapterId === 'ch-6') return isStageCompleted('c5-epilogue');
+    if (chapterId === 'ch-7') return isStageCompleted('c6-boss-ex-thief');
     return isStageCompleted('stage-0');
   };
 
@@ -611,14 +790,29 @@ export default function App() {
     if (stageId === 'c5-story-2') return isStageCompleted('c5-battle-4');
     if (stageId === 'c5-boss-1') return isStageCompleted('c5-story-2');
     if (stageId === 'c5-epilogue') return isStageCompleted('c5-boss-1');
+    if (stageId === 'c6-story-1') return isChapterUnlocked('ch-6');
+    if (stageId === 'c6-battle-1') return isStageCompleted('c6-story-1');
+    if (stageId === 'c6-battle-2') return isStageCompleted('c6-battle-1');
+    if (stageId === 'c6-boss-ex-elder') return isStageCompleted('c6-battle-2');
+    if (stageId === 'c6-boss-ex-dragon') return isStageCompleted('c6-boss-ex-elder');
+    if (stageId === 'c6-boss-ex-thief') return isStageCompleted('c6-boss-ex-dragon');
+    if (stageId === 'c7-boss-ex-lava') return isChapterUnlocked('ch-7');
+    if (stageId === 'c7-boss-ex-mummy') return isStageCompleted('c7-boss-ex-lava');
     return false;
   };
 
   const getShopPrismCount = () => getInvCount(itemInv, 'it_purify_prism');
 
-  /** 商店可購道具：0=僅治療藥水；1=+魔力藥水、下級修煉手冊；2=+下級修煉手冊+、萬靈藥；3=+中級手冊、治癒粉塵、中級治療藥水；4=+中級魔力藥水、中級修煉手冊+ */
+  /** 商店可購道具：0=僅治療藥水；1=+魔力藥水、下級修煉手冊；2=+下級修煉手冊+、萬靈藥；3=+中級手冊、治癒粉塵、中級治療藥水；4=+中級魔力藥水、中級修煉手冊+（通用餐卷／鍛造幣／訓練指導書不販售） */
   const canBuyItemInShop = (itemId) => {
     const n = getShopPrismCount();
+    if (
+      itemId === 'it_tavern_voucher' ||
+      itemId === 'it_forge_token' ||
+      itemId === 'it_forge_token_force' ||
+      itemId === 'it_training_guide'
+    )
+      return false;
     if (itemId === 'it_potion') return true;
     if (itemId === 'it_ether') return n >= 1;
     if (itemId === 'it_training_book_low') return n >= 1;
@@ -644,10 +838,14 @@ export default function App() {
 
   useEffect(() => {
     if (!isHeroUnlocked(lobbyHeroId)) {
-      const first = HEROES_BASE.find((h) => isHeroUnlocked(h.id))?.id ?? 'h1';
+      const first = HEROES_BASE.find((h) => isHeroUnlocked(h.id))?.id ?? 'Puersz';
       setLobbyHeroId(first);
     }
   }, [allHeroesUnlocked, unlockedHeroIds, lobbyHeroId]);
+
+  useEffect(() => {
+    saveLobbyHeroId(lobbyHeroId);
+  }, [lobbyHeroId]);
 
   useEffect(() => {
     if (!lobbyNotice) return;
@@ -667,8 +865,27 @@ export default function App() {
   }, [scene, lobbyHeroId]);
 
   useEffect(() => {
+    setLobbyBgImgVisible(false);
+  }, [sceneBgId]);
+
+  useEffect(() => {
     if (scene !== 'lobby') setLobbyPanelModal(null);
   }, [scene]);
+
+  useEffect(() => {
+    if (lobbyPanelModal === 'daily') setDailyQ(loadDailyQuestsState());
+  }, [lobbyPanelModal]);
+
+  useEffect(() => {
+    if (lobbyPanelModal !== 'recruit') {
+      setStarWishOddsOpen(false);
+      setRecruitWishTab('limited');
+    }
+  }, [lobbyPanelModal]);
+
+  useEffect(() => {
+    if (recruitWishTab !== 'limited') setStarWishOddsOpen(false);
+  }, [recruitWishTab]);
 
   const showLobbyGreeting = (heroId) => {
     const pool = LOBBY_GREETINGS[heroId] ?? LOBBY_DEFAULT_GREETINGS;
@@ -732,23 +949,138 @@ export default function App() {
   }, [lobbyPanelModal]);
 
   useEffect(() => {
-    saveHeroEquipMap(heroEquipMap);
-  }, [heroEquipMap]);
+    if (!lobbyPanelModal) return;
+    if (lobbyPanelModal === 'forge' || lobbyPanelModal === 'training' || lobbyPanelModal === 'camp' || lobbyPanelModal === 'garden') {
+      setFacilityNpcTalkIdx((s) => ({ ...(s ?? {}), [lobbyPanelModal]: 0 }));
+    }
+  }, [lobbyPanelModal]);
 
   useEffect(() => {
-    saveEquipInventory(equipInv);
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem('aethelgard-camp-buff-v1', JSON.stringify(campBuff ?? null));
+    } catch {
+      /* ignore */
+    }
+  }, [campBuff]);
+
+  useEffect(() => {
+    saveCampRecipeOwnedIds(campOwnedRecipeIds);
+  }, [campOwnedRecipeIds]);
+
+  useEffect(() => {
+    saveHeroEquipMapV2(heroEquipV2);
+  }, [heroEquipV2]);
+
+  useEffect(() => {
+    saveSkillMasteryMap(skillMasteryMap);
+  }, [skillMasteryMap]);
+
+  useEffect(() => {
+    saveBondMap(bondMap);
+  }, [bondMap]);
+
+  // 若全角色全技能都已滿級，避免每日任務抽到「訓練一次」而卡死
+  useEffect(() => {
+    const s = dailyQ ?? loadDailyQuestsState();
+    if (!s?.picked?.includes('training_buy')) return;
+    const unlocked = HEROES_BASE.filter((h) => isHeroUnlocked(h.id));
+    const hasTrainable = unlocked.some((h) => {
+      const skills = getSkillsForHero({ id: h.id }) ?? [];
+      return skills.some((sk) => getMasteryRank(skillMasteryMap?.[h.id]?.[sk.id]?.uses ?? 0) < 10);
+    });
+    if (hasTrainable) return;
+    // 重新 roll 今天的任務直到沒有 training_buy（最多嘗試幾次避免死迴圈）
+    let next = loadDailyQuestsState();
+    for (let i = 0; i < 8 && next?.picked?.includes('training_buy'); i += 1) {
+      clearDailyQuestsStorage();
+      next = loadDailyQuestsState();
+    }
+    setDailyQ(next);
+  }, [dailyQ, skillMasteryMap, allHeroesUnlocked, unlockedHeroIds]);
+
+  useEffect(() => {
+    // instances are persisted by the instance storage layer
+    if (typeof window === 'undefined') return;
+    try {
+      const { saveEquipInstances } = require('./lib/equipInstanceStorage.js');
+      saveEquipInstances(equipInstances);
+    } catch {
+      /* ignore */
+    }
+  }, [equipInstances]);
+
+  // 裝備詞條（instance）：打開換裝視窗時，為「已穿戴的實例」生成/補齊詞條
+  useEffect(() => {
+    if (!equipModalHeroId) return;
+    const heroId = equipModalHeroId;
+    const forgeLevel = getForgeLevelFromInventory(itemInv);
+    const eq = heroEquipV2?.[heroId];
+    const slots = [
+      { slotKey: 'weapon', eid: eq?.weaponEid ?? null },
+      { slotKey: 'offhand', eid: eq?.offhandEid ?? null },
+      { slotKey: 'armor', eid: eq?.armorEid ?? null },
+    ];
+    setEquipInstances((prev) => {
+      let next = Array.isArray(prev) ? prev : [];
+      for (const s of slots) {
+        if (!s.eid) continue;
+        const idx = next.findIndex((x) => x.eid === s.eid);
+        if (idx < 0) continue;
+        const inst = next[idx];
+        const itemId = inst?.itemId ?? null;
+        if (!itemId) continue;
+        if (Array.isArray(inst.affixes) && inst.affixes.length > 0) continue;
+        const salt = Math.max(0, Math.floor(Number(inst.salt) || 0));
+        const affixes = rollAffixesForEquip({ heroId, slotKey: s.slotKey, itemId, forgeLevel, salt });
+        const patched = { ...inst, affixes };
+        next = next.map((x, i) => (i === idx ? patched : x));
+      }
+      return next;
+    });
+  }, [equipModalHeroId, itemInv, heroEquipV2]);
+
+  useEffect(() => {
+    // legacy count-based equip inventory is no longer written
   }, [equipInv]);
 
   useEffect(() => {
     saveItemInventory(itemInv);
   }, [itemInv]);
 
+  useEffect(() => {
+    saveGardenPlots(gardenPlots);
+  }, [gardenPlots]);
+
+  useEffect(() => {
+    saveFishCodex(fishCodex);
+  }, [fishCodex]);
+
+  useEffect(() => {
+    saveDailyQuestsState(dailyQ);
+  }, [dailyQ]);
+
+  const bumpDailyQuest = (qid, amount = 1) => {
+    const d = Math.max(1, Math.floor(Number(amount) || 0));
+    setDailyQ((s) => {
+      if (!s?.picked?.includes(qid)) return s;
+      const def = DAILY_QUEST_DEFS[qid];
+      if (!def) return s;
+      const now = loadDailyQuestsState();
+      if (now.date !== s.date) return now;
+      const p = Math.max(0, Number(s.prog?.[qid] ?? 0));
+      return { ...s, prog: { ...(s.prog ?? {}), [qid]: Math.min(def.target, p + d) } };
+    });
+  };
+
   const rosterFromParty = () =>
     partyIds
       .map((id) => HEROES_BASE.find((u) => u.id === id))
       .filter(Boolean);
 
-  const grantVictory = (battleMonsters) => {
+  const grantVictory = (battleMonsters, rewardStageId) => {
+    const sid = rewardStageId ?? selectedStageId;
+    const sidStr = String(sid || '');
     const bm = battleMonsters ?? monsters;
     const captainId = partyIds[0];
     const passive = getCaptainPassiveDef(captainId);
@@ -772,6 +1104,26 @@ export default function App() {
         : ''
     );
 
+    // 經驗／金錢關卡：改成「通關才扣次數」，輸了不扣
+    if (sidStr.startsWith('xp-')) {
+      const res = consumeExpStageRun();
+      if (!res.ok) {
+        // 理論上不會發生（出發前已擋），但保底避免白拿獎勵
+        setExpRunsLeft(getExpStageRunsLeft());
+        setStageNotice(`今日經驗關卡次數已用完（0/${EXP_STAGE_DAILY_LIMIT}）。`);
+        return;
+      }
+      setExpRunsLeft(res.remaining);
+    } else if (sidStr.startsWith('gl-')) {
+      const res = consumeGoldStageRun();
+      if (!res.ok) {
+        setGoldRunsLeft(getGoldStageRunsLeft());
+        setStageNotice(`今日金錢關卡次數已用完（0/${GOLD_STAGE_DAILY_LIMIT}）。`);
+        return;
+      }
+      setGoldRunsLeft(res.remaining);
+    }
+
     const { lines } = awardPartyXp(partyIds, totalXp);
     setVictoryXpReport(lines);
     setVictoryGoldGain(totalGold);
@@ -779,14 +1131,31 @@ export default function App() {
 
     setVictoryStarCrystalLine('');
     const starSnap = loadStarCrystalBalance();
-    completeStage(selectedStageId);
+    completeStage(sid);
     const afterClear = loadStarCrystalBalance();
-    const sidStr = String(selectedStageId || '');
     if (sidStr.startsWith('xp-')) {
       grantStarCrystalExpStageClear();
+      setDailyQ((s) => {
+        const qid = 'clear_xp';
+        if (!s?.picked?.includes(qid)) return s;
+        const def = DAILY_QUEST_DEFS[qid];
+        const now = loadDailyQuestsState();
+        if (now.date !== s.date) return now;
+        const p = Math.max(0, Number(s.prog?.[qid] ?? 0));
+        return { ...s, prog: { ...(s.prog ?? {}), [qid]: Math.min(def.target, p + 1) } };
+      });
     }
     if (sidStr.startsWith('gl-')) {
       grantStarCrystalGoldStageClear();
+      setDailyQ((s) => {
+        const qid = 'clear_gold';
+        if (!s?.picked?.includes(qid)) return s;
+        const def = DAILY_QUEST_DEFS[qid];
+        const now = loadDailyQuestsState();
+        if (now.date !== s.date) return now;
+        const p = Math.max(0, Number(s.prog?.[qid] ?? 0));
+        return { ...s, prog: { ...(s.prog ?? {}), [qid]: Math.min(def.target, p + 1) } };
+      });
     }
     const starEnd = loadStarCrystalBalance();
     setStarCrystals(starEnd);
@@ -804,7 +1173,7 @@ export default function App() {
     setVictoryLootLine('');
     let claims = loadBossLootClaims();
     const lootParts = [];
-    if (selectedStageId === 'c1-boss-1' && !claims['c1-boss-1']) {
+    if (sid === 'c1-boss-1' && !claims['c1-boss-1']) {
       claims = { ...claims, 'c1-boss-1': true };
       saveBossLootClaims(claims);
       const maxP = getItemMaxStack('it_purify_prism');
@@ -814,7 +1183,7 @@ export default function App() {
         setItemInv((inv) => incInv(inv, 'it_purify_prism', addP));
         lootParts.push(`淨化稜晶 ×${addP}`);
       }
-    } else if (selectedStageId === 'c2-boss-1' && !claims['c2-boss-1']) {
+    } else if (sid === 'c2-boss-1' && !claims['c2-boss-1']) {
       claims = { ...claims, 'c2-boss-1': true };
       saveBossLootClaims(claims);
       const maxU = getItemMaxStack('it_purify_prism');
@@ -824,7 +1193,7 @@ export default function App() {
         setItemInv((inv) => incInv(inv, 'it_purify_prism', addU));
         lootParts.push(`淨化稜晶 ×${addU}`);
       }
-    } else if (selectedStageId === 'c4-boss-1' && !claims['c4-boss-1']) {
+    } else if (sid === 'c4-boss-1' && !claims['c4-boss-1']) {
       claims = { ...claims, 'c4-boss-1': true };
       saveBossLootClaims(claims);
       const maxG = getItemMaxStack('it_purify_prism');
@@ -834,7 +1203,7 @@ export default function App() {
         setItemInv((inv) => incInv(inv, 'it_purify_prism', addG));
         lootParts.push(`淨化稜晶 ×${addG}（第三顆）`);
       }
-    } else if (selectedStageId === 'c5-boss-1' && !claims['c5-boss-1']) {
+    } else if (sid === 'c5-boss-1' && !claims['c5-boss-1']) {
       claims = { ...claims, 'c5-boss-1': true };
       saveBossLootClaims(claims);
       const maxQ = getItemMaxStack('it_purify_prism');
@@ -850,7 +1219,69 @@ export default function App() {
       unlockAudio();
       SFX.levelUp();
     }
+    // 羈絆：勝利後，上陣角色兩兩 +1 點（也同步到每日任務的「羈絆點數」）
+    if (Array.isArray(partyIds) && partyIds.length >= 2) {
+      setBondMap((prev) => {
+        let next = prev ?? {};
+        for (let i = 0; i < partyIds.length; i += 1) {
+          for (let j = i + 1; j < partyIds.length; j += 1) {
+            next = addBondPoints(next, partyIds[i], partyIds[j], 1);
+          }
+        }
+        return next;
+      });
+      const gained = (partyIds.length * (partyIds.length - 1)) / 2;
+      setDailyQ((s) => {
+        const qid = 'bond_gain';
+        if (!s?.picked?.includes(qid)) return s;
+        const def = DAILY_QUEST_DEFS[qid];
+        const now = loadDailyQuestsState();
+        if (now.date !== s.date) return now;
+        const p = Math.max(0, Number(s.prog?.[qid] ?? 0));
+        return { ...s, prog: { ...(s.prog ?? {}), [qid]: Math.min(def.target, p + gained) } };
+      });
+    }
+    setSelectedStageId(sid);
     setScene('victory');
+  };
+
+  /** 已通關的經驗／金錢關卡可掃蕩：扣同日次數、立即結算（等同通關）。 */
+  const sweepClearedExpGoldStage = (stageId) => {
+    setStageNotice('');
+    const stage = STAGES.find((s) => s.id === stageId) ?? null;
+    if (!stage || (stage.kind !== 'xp' && stage.kind !== 'gold')) return;
+    if (!isStageUnlocked(stageId)) {
+      setStageNotice('此關卡尚未解鎖。');
+      return;
+    }
+    if (!isStageCompleted(stageId)) {
+      setStageNotice('須先通關一次後才能掃蕩。');
+      return;
+    }
+    if (rosterFromParty().length < MIN_PARTY) {
+      setStageNotice(`隊伍至少需要 ${MIN_PARTY} 人。`);
+      return;
+    }
+    if (stage.kind === 'xp') {
+      const res = consumeExpStageRun();
+      if (!res.ok) {
+        setExpRunsLeft(getExpStageRunsLeft());
+        setStageNotice(`今日經驗關卡次數已用完（0/${EXP_STAGE_DAILY_LIMIT}）。之後可用入場券恢復次數。`);
+        return;
+      }
+      setExpRunsLeft(res.remaining);
+    } else {
+      const res = consumeGoldStageRun();
+      if (!res.ok) {
+        setGoldRunsLeft(getGoldStageRunsLeft());
+        setStageNotice(`今日金錢關卡次數已用完（0/${GOLD_STAGE_DAILY_LIMIT}）。`);
+        return;
+      }
+      setGoldRunsLeft(res.remaining);
+    }
+    unlockAudio();
+    SFX.uiClick();
+    grantVictory(stage.monsters, stageId);
   };
 
   const togglePartyMember = (heroId) => {
@@ -889,7 +1320,7 @@ export default function App() {
 
   /** 熔岩核心全滅後，移除熔岩巨人因核心獲得的額外 HP 上限 */
   const applyLavaCoreDeathBonusStrip = (mList) => {
-    const coreAlive = mList.some((m) => m.curHp > 0 && monsterTemplateId(m.id) === 'c4-lava-core');
+    const coreAlive = mList.some((m) => m.curHp > 0 && isLavaCoreTemplateId(monsterTemplateId(m.id)));
     if (coreAlive) return mList;
     return mList.map((m) => {
       const bonus = m.lavaCoreMaxHpBonus ?? 0;
@@ -914,32 +1345,166 @@ export default function App() {
       return;
     }
     const xpMap = loadHeroXpMap();
+    const forgeLevel = getForgeLevelFromInventory(itemInv);
     const roster = rosterFromParty()
       .map((u) => applyLevelLinearStatsToHero(u, xpMap[u.id] ?? defaultProgress()))
-      .map((u) => applyEquipmentToHero(u, heroEquipMap[u.id] ?? defaultEquip()))
+      .map((u) => applyEquipmentToHero(u, equipItemIdsForHero(u.id)))
       .map((u) => applyTalentStatsToUnit({ ...u, isHero: true }, talentMap));
     if (roster.length < MIN_PARTY) return;
     const { heroes: h0, auraLine } = buildBattleHeroesWithAura(roster, partyIds[0]);
+
+    // 裝備詞條（instance）：確保「目前穿戴的實例」有詞條
+    for (const hero of roster) {
+      const eq2 = equipForHeroV2(hero.id);
+      const slots = [
+        { slotKey: 'weapon', eid: eq2.weaponEid },
+        { slotKey: 'offhand', eid: eq2.offhandEid },
+        { slotKey: 'armor', eid: eq2.armorEid },
+      ];
+      for (const s of slots) {
+        if (!s.eid) continue;
+        const inst = getInstanceByEid(s.eid);
+        if (!inst?.itemId) continue;
+        if (Array.isArray(inst.affixes) && inst.affixes.length > 0) continue;
+        const salt = Math.max(0, Math.floor(Number(inst.salt) || 0));
+        const affixes = rollAffixesForEquip({ heroId: hero.id, slotKey: s.slotKey, itemId: inst.itemId, forgeLevel, salt });
+        setEquipInstances((list) => (Array.isArray(list) ? list.map((x) => (x.eid === s.eid ? { ...x, affixes } : x)) : []));
+      }
+    }
+
+    const applyForgeAndAffixBonus = (hero) => {
+      if (!hero?.isHero) return hero;
+      const eq = equipItemIdsForHero(hero.id);
+      const baseBonus = getEquipStatBonus(eq);
+      const forgeMul = 1 + Math.max(0, Math.min(4, forgeLevel)) * 0.02;
+      const forgeDelta = {
+        hp: Math.round((baseBonus.hp ?? 0) * (forgeMul - 1)),
+        atk: Math.round((baseBonus.atk ?? 0) * (forgeMul - 1)),
+        matk: Math.round((baseBonus.matk ?? 0) * (forgeMul - 1)),
+        def: Math.round((baseBonus.def ?? 0) * (forgeMul - 1)),
+        mdef: Math.round((baseBonus.mdef ?? 0) * (forgeMul - 1)),
+        spd: Math.round((baseBonus.spd ?? 0) * (forgeMul - 1)),
+      };
+      const affixStats = {
+        hp: 0,
+        atk: 0,
+        matk: 0,
+        def: 0,
+        mdef: 0,
+        spd: 0,
+        critRateAdd: 0,
+        critDmgMul: 1,
+        skillDmgMul: 1,
+        incomingDmgMul: 1,
+        ccHitAdd: 0,
+        ailResistAdd: 0,
+      };
+      {
+        const e2 = equipForHeroV2(hero.id);
+        const insts = [getInstanceByEid(e2.weaponEid), getInstanceByEid(e2.offhandEid), getInstanceByEid(e2.armorEid)].filter(Boolean);
+        const s = sumAffixStats(insts.flatMap((x) => x.affixes ?? []));
+        affixStats.hp += s.hp;
+        affixStats.atk += s.atk;
+        affixStats.matk += s.matk;
+        affixStats.def += s.def;
+        affixStats.mdef += s.mdef;
+        affixStats.spd += s.spd;
+        affixStats.critRateAdd += s.critRateAdd ?? 0;
+        affixStats.critDmgMul *= s.critDmgMul ?? 1;
+        affixStats.skillDmgMul *= s.skillDmgMul ?? 1;
+        affixStats.incomingDmgMul *= s.incomingDmgMul ?? 1;
+        affixStats.ccHitAdd += s.ccHitAdd ?? 0;
+        affixStats.ailResistAdd += s.ailResistAdd ?? 0;
+      }
+      return {
+        ...hero,
+        hp: Math.max(1, (hero.hp ?? 1) + forgeDelta.hp + affixStats.hp),
+        atk: Math.max(1, (hero.atk ?? 1) + forgeDelta.atk + affixStats.atk),
+        matk: Math.max(0, (hero.matk ?? 0) + forgeDelta.matk + affixStats.matk),
+        def: Math.max(1, (hero.def ?? 1) + forgeDelta.def + affixStats.def),
+        mdef: Math.max(1, (hero.mdef ?? hero.def ?? 1) + forgeDelta.mdef + affixStats.mdef),
+        spd: Math.max(1, (hero.spd ?? 1) + forgeDelta.spd + affixStats.spd),
+        affixCritRateAdd: Math.max(0, Math.min(0.5, (affixStats.critRateAdd ?? 0) / 100)),
+        affixCritDmgMul: Math.max(1, affixStats.critDmgMul ?? 1),
+        affixSkillDmgMul: Math.max(1, affixStats.skillDmgMul ?? 1),
+        affixIncomingDmgMul: Math.max(0.6, Math.min(1, affixStats.incomingDmgMul ?? 1)),
+        affixCcHitAdd: Math.max(0, Math.min(0.25, affixStats.ccHitAdd ?? 0)),
+        affixAilResistAdd: Math.max(0, Math.min(0.25, affixStats.ailResistAdd ?? 0)),
+      };
+    };
+
     const h = h0.map((u) => {
+      let uu = applyForgeAndAffixBonus(u);
       const t = getBattleStartTauntTurnsFromTalents(talentMap, u.id);
-      return t > 0 ? { ...u, tauntTurns: Math.max(u.tauntTurns ?? 0, t) } : u;
+
+      // 羈絆戰前加成：若與隊伍中任一夥伴羈絆 Lv>=1，開場 +5 MP；總加成封頂 10
+      const buddies = (partyIds ?? []).filter((id) => id && id !== uu.id);
+      let mpAdd = 0;
+      for (const b of buddies) {
+        const lv = getBondLevel(getBondPoints(bondMap, uu.id, b));
+        if (lv >= 1) mpAdd += 5;
+      }
+      mpAdd = Math.min(10, mpAdd);
+      if (mpAdd > 0) uu = { ...uu, curMp: Math.min(MP_MAX, (uu.curMp ?? 0) + mpAdd) };
+
+      if (t > 0) uu = { ...uu, tauntTurns: Math.max(uu.tauntTurns ?? 0, t) };
+      return uu;
     });
+
+    // 餐酒館：料理戰前 Buff（只生效 1 場）
+    const camp = campBuff && typeof campBuff === 'object' ? campBuff : null;
+    let hCamp = h;
+    if (camp?.apply?.type === 'atkMul') {
+      const mul = typeof camp.apply.mul === 'number' ? Math.max(1, camp.apply.mul) : 1;
+      const turns = Math.max(1, Math.floor(Number(camp.apply.turns) || 2));
+      if (mul !== 1)
+        hCamp = hCamp.map((x) =>
+          x.curHp > 0 ? { ...x, atkBuffTurns: Math.max(x.atkBuffTurns ?? 0, turns), atkBuffMul: Math.max(x.atkBuffMul ?? 1, mul) } : x
+        );
+    } else if (camp?.apply?.type === 'defMul') {
+      const mul = typeof camp.apply.mul === 'number' ? Math.max(1, camp.apply.mul) : 1;
+      const turns = Math.max(1, Math.floor(Number(camp.apply.turns) || 2));
+      if (mul !== 1)
+        hCamp = hCamp.map((x) =>
+          x.curHp > 0
+            ? {
+                ...x,
+                campIncomingDmgMulTurns: Math.max(x.campIncomingDmgMulTurns ?? 0, turns),
+                campIncomingDmgMul: Math.min(x.campIncomingDmgMul ?? 1, 1 / mul),
+              }
+            : x
+        );
+    } else if (camp?.apply?.type === 'spdMul') {
+      const mul = typeof camp.apply.mul === 'number' ? Math.max(1, camp.apply.mul) : 1;
+      const turns = Math.max(1, Math.floor(Number(camp.apply.turns) || 2));
+      if (mul !== 1)
+        hCamp = hCamp.map((x) =>
+          x.curHp > 0 ? { ...x, spdBuffTurns: Math.max(x.spdBuffTurns ?? 0, turns), spdBuffMul: Math.max(x.spdBuffMul ?? 1, mul) } : x
+        );
+    } else if (camp?.apply?.type === 'matkMul') {
+      const mul = typeof camp.apply.mul === 'number' ? Math.max(1, camp.apply.mul) : 1;
+      const turns = Math.max(1, Math.floor(Number(camp.apply.turns) || 2));
+      if (mul !== 1)
+        hCamp = hCamp.map((x) =>
+          x.curHp > 0 ? { ...x, matkBuffTurns: Math.max(x.matkBuffTurns ?? 0, turns), matkBuffMul: Math.max(x.matkBuffMul ?? 1, mul) } : x
+        );
+    } else if (camp?.apply?.type === 'avMul') {
+      const mul = typeof camp.apply.mul === 'number' ? Math.max(0.2, Math.min(1, camp.apply.mul)) : 1;
+      if (mul !== 1) hCamp = hCamp.map((x) => (x.curHp > 0 ? { ...x, av: Math.max(0, (x.av ?? 0) * mul) } : x));
+    }
+    if (camp) setCampBuff(null);
     if (stage?.kind === 'xp') {
-      const res = consumeExpStageRun();
-      if (!res.ok) {
+      if (expRunsLeft <= 0) {
         setExpRunsLeft(getExpStageRunsLeft());
         setStageNotice(`今日經驗關卡次數已用完（0/${EXP_STAGE_DAILY_LIMIT}）。之後可用入場券恢復次數。`);
         return;
       }
-      setExpRunsLeft(res.remaining);
     } else if (stage?.kind === 'gold') {
-      const res = consumeGoldStageRun();
-      if (!res.ok) {
+      if (goldRunsLeft <= 0) {
         setGoldRunsLeft(getGoldStageRunsLeft());
         setStageNotice(`今日金錢關卡次數已用完（0/${GOLD_STAGE_DAILY_LIMIT}）。`);
         return;
       }
-      setGoldRunsLeft(res.remaining);
     }
     const baseMonsters = stage?.monsters ?? MONSTERS_BASE;
     let m = baseMonsters.map((u, i) => ({
@@ -962,9 +1527,9 @@ export default function App() {
       av: 10000 / u.spd,
       isHero: false,
     }));
-    if (stage?.id === 'c4-boss-1') {
-      const giantI = m.findIndex((mm) => monsterTemplateId(mm.id) === 'boss-lava-giant');
-      const coreI = m.findIndex((mm) => monsterTemplateId(mm.id) === 'c4-lava-core');
+    if (stage?.id === 'c4-boss-1' || stage?.id === 'c7-boss-ex-lava') {
+      const giantI = m.findIndex((mm) => isLavaGiantTemplateId(monsterTemplateId(mm.id)));
+      const coreI = m.findIndex((mm) => isLavaCoreTemplateId(monsterTemplateId(mm.id)));
       if (giantI >= 0 && coreI >= 0) {
         const g = m[giantI];
         const bonus = Math.round(g.hp * 0.42);
@@ -974,13 +1539,13 @@ export default function App() {
       }
     }
     let jackOpeningDazzle = 0;
-    if (partyIds.includes('h9')) {
-      jackOpeningDazzle = getBattleStartDazzleAllTurnsFromTalents(talentMap, 'h9');
+    if (partyIds.includes('jack')) {
+      jackOpeningDazzle = getBattleStartDazzleAllTurnsFromTalents(talentMap, 'jack');
       if (jackOpeningDazzle > 0) {
         m = m.map((mm) => (mm.curHp > 0 ? applyDazzleOnTarget(mm, jackOpeningDazzle) : mm));
       }
     }
-    const heroesForBattle = h.map((u) => ({ ...defaultAilmentFields(), ...u }));
+    const heroesForBattle = hCamp.map((u) => ({ ...defaultAilmentFields(), ...u }));
     setHeroes(heroesForBattle);
     setMonsters(m);
     setTurnSeq(0);
@@ -988,9 +1553,9 @@ export default function App() {
     setScene('battle');
     const intro = [`戰鬥開始！${stage?.title ?? '未知關卡'}`];
     if (jackOpeningDazzle > 0) {
-      intro.push(`怪盜風・開幕眩術：敵方全體眩目（${jackOpeningDazzle} 回合）`);
+      intro.push(`開幕眩術：敵方全體眩目（${jackOpeningDazzle} 回合）`);
     }
-    if (stage?.id === 'c4-boss-1') {
+    if (stage?.id === 'c4-boss-1' || stage?.id === 'c7-boss-ex-lava') {
       intro.push('普爾斯：「優先破壞熔岩核心——它會強化巨人的體魄，還會不斷把熱能輸回巨人身上！」');
     }
     if (auraLine) intro.push(auraLine);
@@ -1033,6 +1598,14 @@ export default function App() {
       const dot = applyTurnStartDots(nextUnit);
       if (dot.logs.length) {
         setLogs((prev) => [...dot.logs, ...prev].slice(0, 5));
+      }
+      if (!nextUnit?.isHero && nextUnit?.curHp > 0 && dot.unit?.curHp <= 0) {
+        const boom = triggerDeathMarkExplosion(nextUnit, mCur);
+        if (boom.logLine) setLogs((prev) => [boom.logLine, ...prev].slice(0, 5));
+        if (boom.monstersNext !== mCur) {
+          mCur = applyLavaCoreDeathBonusStrip(boom.monstersNext);
+          setMonsters(mCur);
+        }
       }
       if (dot.unit !== nextUnit) {
         if (side === 'hero') {
@@ -1081,16 +1654,23 @@ export default function App() {
           nextUnit.passive?.effect?.type === 'jackDrawSustainMp' && (nextUnit.jackDrawBuffTurns ?? 0) > 0
             ? (nextUnit.passive.effect.value ?? 0)
             : 0;
+        const allyMp = nextUnit.passive?.effect?.type === 'allyAllTurnStartMp' ? (nextUnit.passive.effect.value ?? 0) : 0;
         const mpGainTalent = getExtraTurnStartMpFromTalents(talentMap, id);
         const mpGain = mpGainBase + mpGainTalent + mpGainJackDraw;
         if (mpGain > 0) {
           heroPatch = heroPatch.map((h) => (h.id === id ? { ...h, curMp: Math.min(MP_MAX, h.curMp + mpGain) } : h));
         }
+        if (allyMp > 0) {
+          heroPatch = heroPatch.map((h) =>
+            h.curHp > 0 ? { ...h, curMp: Math.min(MP_MAX, (h.curMp ?? 0) + allyMp) } : h
+          );
+        }
         let cur = heroPatch.find((h) => h.id === id) ?? nextUnit;
         if ((cur.regenTurns ?? 0) > 0 && (cur.regenHeal ?? 0) > 0) {
           const heal = cur.regenHeal;
           const poisonMul = getIncomingHealMulFromPoison(cur);
-          const healAmt = Math.max(1, Math.floor(heal * poisonMul));
+          const incMul = cur?.isHero ? getIncomingHealMulFromTalents(talentMap, id) : 1;
+          const healAmt = Math.max(1, Math.floor(heal * poisonMul * incMul));
           heroPatch = heroPatch.map((h) =>
             h.id === id
               ? {
@@ -1107,6 +1687,44 @@ export default function App() {
           hCur = heroPatch;
           setHeroes(hCur);
         }
+      }
+
+      // 暈眩：輪到自己行動時直接跳過（暈眩結束後 2 回合內免疫）
+      ({ u: nextUnit } = pickUpdated());
+      if (nextUnit?.curHp > 0 && (nextUnit.stunTurns ?? 0) > 0) {
+        const id = nextUnit.id;
+        const spd = getEffectiveSpd(nextUnit);
+        const nextAv = nextUnit.av + 10000 / spd;
+        const prevTurns = nextUnit.stunTurns ?? 0;
+        const afterTurns = Math.max(0, prevTurns - 1);
+        const gainedImmune = prevTurns > 0 && afterTurns === 0;
+        const patch = {
+          ...nextUnit,
+          av: nextAv,
+          status: nextUnit.isHero ? null : (nextUnit.status ?? null),
+          stunTurns: afterTurns,
+          ...(gainedImmune ? { stunImmuneTurns: Math.max(nextUnit.stunImmuneTurns ?? 0, STUN_IMMUNE_TURNS_AFTER) } : {}),
+        };
+
+        setLogs((prev) => [`${nextUnit.name} 暈眩，無法行動！`, ...prev].slice(0, 5));
+        if (side === 'hero') {
+          hCur = hCur.map((h) => (h.id === id ? patch : h));
+          setHeroes(hCur);
+        } else if (side === 'monster') {
+          mCur = applyLavaCoreDeathBonusStrip(mCur.map((m) => (m.id === id ? patch : m)));
+          setMonsters(mCur);
+        } else {
+          // fallback：兩邊找
+          if (hCur.some((h) => h.id === id)) {
+            hCur = hCur.map((h) => (h.id === id ? patch : h));
+            setHeroes(hCur);
+          } else if (mCur.some((m) => m.id === id)) {
+            mCur = applyLavaCoreDeathBonusStrip(mCur.map((m) => (m.id === id ? patch : m)));
+            setMonsters(mCur);
+          }
+        }
+        // 直接結束本次輪到的行動者，重新挑下一位
+        continue;
       }
 
       const finalPick = () => hCur.find((h) => h.id === headId) ?? mCur.find((m) => m.id === headId) ?? nextUnit;
@@ -1151,12 +1769,24 @@ export default function App() {
     }
   };
 
-  const advanceTurn = (hList, mList, endedHeroId = null) => {
+  const advanceTurn = (hList, mList, endedHeroId = null, endedMonsterId = null) => {
     setTurnSeq((t) => t + 1);
     const h2 = tickHeroBuffsOnEndTurn(hList, endedHeroId);
-    const m2 = tickMonsterDebuffsOnEndTurn(mList);
+    const m2 = tickMonsterDebuffsOnEndTurn(mList, endedMonsterId);
     const ticked = tickAilmentDurationsAll(h2, m2);
     calculateNextTurn(ticked.heroes, ticked.monsters);
+  };
+
+  const triggerDeathMarkExplosion = (monster, monsterList) => {
+    if (!monster || !monster.deathMark) return { monstersNext: monsterList, logLine: null };
+    const alive = monsterList.filter((m) => m.curHp > 0 && m.id !== monster.id);
+    if (alive.length === 0) return { monstersNext: monsterList, logLine: null };
+    const tgt = alive[Math.floor(Math.random() * alive.length)];
+    const dmg = Math.max(1, Math.floor((monster.hp ?? 1) * 0.2));
+    const monstersNext = monsterList.map((m) =>
+      m.id === tgt.id ? { ...m, curHp: Math.max(0, (m.curHp ?? 0) - dmg) } : m
+    );
+    return { monstersNext, logLine: `死亡標記爆發：${monster.name} 倒下時波及 ${tgt.name} -${dmg}` };
   };
 
   const endHeroAction = (baseHeroes, { mpCost = 0, mpGain = 0 } = {}) => {
@@ -1199,10 +1829,8 @@ export default function App() {
     const mdefMul = (defU.mdefDownTurns ?? 0) > 0 ? defU.mdefDownMul ?? 1 : 1;
     let effDef = Math.max(1, Math.floor(rawDef * defMul));
     let effMdef = Math.max(1, Math.floor(rawMdef * mdefMul));
-    if (defU.isHero) {
-      if ((defU.defBuffTurns ?? 0) > 0) effDef = Math.max(1, Math.floor(effDef * (defU.defBuffMul ?? 1)));
-      if ((defU.mdefBuffTurns ?? 0) > 0) effMdef = Math.max(1, Math.floor(effMdef * (defU.mdefBuffMul ?? 1)));
-    }
+    if ((defU.defBuffTurns ?? 0) > 0) effDef = Math.max(1, Math.floor(effDef * (defU.defBuffMul ?? 1)));
+    if ((defU.mdefBuffTurns ?? 0) > 0) effMdef = Math.max(1, Math.floor(effMdef * (defU.mdefBuffMul ?? 1)));
     /** 物攻吃物防；魔攻吃魔抗；複合（mix）吃 (物防+魔抗)/2 */
     const defense = isMixed ? Math.floor((effDef + effMdef) / 2) : isMagical ? effMdef : effDef;
 
@@ -1234,6 +1862,30 @@ export default function App() {
     if (darknessMul !== 1) final = Math.max(1, Math.floor(final * darknessMul));
     const talentMul = getDamageMulFromTalents({ talentMap, attacker: atkU, target: defU });
     if (talentMul !== 1) final = Math.max(1, Math.floor(final * talentMul));
+    // 看破特攻（臨時團隊增傷）：對 weaknessSeen 目標增傷
+    if (
+      atkU?.isHero &&
+      !defU?.isHero &&
+      defU?.weaknessSeen &&
+      (atkU?.weaknessSeenDmgTurns ?? 0) > 0 &&
+      typeof atkU?.weaknessSeenDmgMul === 'number' &&
+      atkU.weaknessSeenDmgMul > 1
+    ) {
+      final = Math.max(1, Math.floor(final * atkU.weaknessSeenDmgMul));
+    }
+    if (atkU?.isHero && !defU?.isHero && atkU.passive?.effect?.type === 'dmgVsAilmentedEnemyMul') {
+      const hasAil =
+        ((defU?.burnTurns ?? 0) > 0 && (defU?.burnStacks ?? 0) > 0) ||
+        (defU?.poisonTurns ?? 0) > 0 ||
+        (defU?.freezeTurns ?? 0) > 0 ||
+        (defU?.darknessTurns ?? 0) > 0 ||
+        (defU?.dazzleTurns ?? 0) > 0 ||
+        (defU?.stunTurns ?? 0) > 0;
+      if (hasAil) {
+        const mul = typeof atkU.passive.effect.mul === 'number' ? atkU.passive.effect.mul : 1;
+        if (mul !== 1) final = Math.max(1, Math.floor(final * mul));
+      }
+    }
     const capDazzMul =
       atkU?.isHero &&
       !defU?.isHero &&
@@ -1243,12 +1895,26 @@ export default function App() {
         ? atkU.captainDmgVsDazzledMul
         : 1;
     if (capDazzMul !== 1) final = Math.max(1, Math.floor(final * capDazzMul));
+    const capStunMul =
+      atkU?.isHero &&
+      !defU?.isHero &&
+      (((defU?.stunTurns ?? 0) > 0) || ((defU?.stunImmuneTurns ?? 0) > 0)) &&
+      typeof atkU.captainDmgVsStunnedOrImmuneMul === 'number' &&
+      atkU.captainDmgVsStunnedOrImmuneMul > 1
+        ? atkU.captainDmgVsStunnedOrImmuneMul
+        : 1;
+    if (capStunMul !== 1) final = Math.max(1, Math.floor(final * capStunMul));
     if (atkU?.isHero && isSkill) {
       const r4Mul = getR4SkillDamageMul(atkU.id);
       if (r4Mul !== 1) final = Math.max(1, Math.floor(final * r4Mul));
+      const affixSkillMul = typeof atkU?.affixSkillDmgMul === 'number' ? Math.max(1, atkU.affixSkillDmgMul) : 1;
+      if (affixSkillMul !== 1) final = Math.max(1, Math.floor(final * affixSkillMul));
     }
     let crit = false;
-    const allowCrit = canPhysicalCrit(isSkill, scale) || canSkillCritFromTalents({ talentMap, attacker: atkU, isSkill, scale });
+    const allowCrit =
+      canPhysicalCrit(isSkill, scale) ||
+      canSkillCritFromTalents({ talentMap, attacker: atkU, isSkill, scale }) ||
+      ((atkU?.skillCritTurns ?? 0) > 0 && Array.isArray(atkU?.skillCritScales) && atkU.skillCritScales.includes(scale));
     const r4Crit = atkU?.isHero ? getR4CritRateAdd(atkU.id) : 0;
     const critChance = Math.min(0.95, Math.max(0, getPhysicalCritChance(atkU) + r4Crit));
     if (allowCrit && Math.random() < critChance) {
@@ -1263,10 +1929,18 @@ export default function App() {
     if (!atkU.isHero && defU.isHero) {
       const mul = defU.incomingDmgMul ?? 1;
       if (mul !== 1) final = Math.max(1, Math.floor(final * mul));
+      if ((defU.campIncomingDmgMulTurns ?? 0) > 0) {
+        const cm = typeof defU.campIncomingDmgMul === 'number' ? defU.campIncomingDmgMul : 1;
+        if (cm !== 1) final = Math.max(1, Math.floor(final * cm));
+      }
       if ((defU.barrierTurns ?? 0) > 0) {
         const bMul = defU.barrierMul ?? 1;
         if (bMul !== 1) final = Math.max(1, Math.floor(final * bMul));
       }
+    }
+    if (defU?.isHero) {
+      const am = typeof defU.affixIncomingDmgMul === 'number' ? defU.affixIncomingDmgMul : 1;
+      if (am !== 1) final = Math.max(1, Math.floor(final * am));
     }
     return { damage: final, crit };
   };
@@ -1298,6 +1972,34 @@ export default function App() {
       return { ...h, barrierTurns: nextTurns };
     });
 
+  const applyBubuMpOnAllyDirectDamage = (hList, hitCount) => {
+    const triggers = Math.max(0, Math.floor(Number(hitCount) || 0));
+    if (triggers <= 0) return { heroesNext: hList, mpGained: 0, triggersApplied: 0 };
+    const def = getMpOnAllyDirectDamageFromTalents(talentMap, 'bubu');
+    if (!def) return { heroesNext: hList, mpGained: 0, triggersApplied: 0 };
+    const bubu = hList.find((h) => h.id === 'bubu') ?? null;
+    if (!bubu || bubu.curHp <= 0) return { heroesNext: hList, mpGained: 0, triggersApplied: 0 };
+
+    const seq = turnSeq;
+    const used = (bubu.guardCycleTurnSeq ?? -1) === seq ? Math.max(0, bubu.guardCycleTriggersUsed ?? 0) : 0;
+    const left = Math.max(0, def.perTurnCap - used);
+    const applyCount = Math.min(triggers, left);
+    if (applyCount <= 0) return { heroesNext: hList, mpGained: 0, triggersApplied: 0 };
+
+    const gain = def.mp * applyCount;
+    const heroesNext = hList.map((h) =>
+      h.id === 'bubu'
+        ? {
+            ...h,
+            curMp: Math.min(MP_MAX, (h.curMp ?? 0) + gain),
+            guardCycleTurnSeq: seq,
+            guardCycleTriggersUsed: used + applyCount,
+          }
+        : h
+    );
+    return { heroesNext, mpGained: gain, triggersApplied: applyCount };
+  };
+
   /** 僅在 endedHeroId 行動結束時扣該員的增益回合（不含其他我方／敵方行動） */
   const tickHeroBuffsOnEndTurn = (hList, endedHeroId) => {
     if (!endedHeroId) return hList;
@@ -1316,8 +2018,12 @@ export default function App() {
         defBuffTurns: Math.max(0, (h.defBuffTurns ?? 0) - 1),
         mdefBuffTurns: Math.max(0, (h.mdefBuffTurns ?? 0) - 1),
         jackDrawBuffTurns: Math.max(0, (h.jackDrawBuffTurns ?? 0) - 1),
-        itemInvertTurns: h.id === 'h9' ? Math.max(0, (h.itemInvertTurns ?? 0) - 1) : (h.itemInvertTurns ?? 0),
+        skillCritTurns: Math.max(0, (h.skillCritTurns ?? 0) - 1),
+        weaknessSeenDmgTurns: Math.max(0, (h.weaknessSeenDmgTurns ?? 0) - 1),
+        itemInvertTurns: h.id === 'jack' ? Math.max(0, (h.itemInvertTurns ?? 0) - 1) : (h.itemInvertTurns ?? 0),
+        campIncomingDmgMulTurns: Math.max(0, (h.campIncomingDmgMulTurns ?? 0) - 1),
       };
+      if ((next.campIncomingDmgMulTurns ?? 0) === 0) next = { ...next, campIncomingDmgMul: 1 };
       if (prevSpdT > 0 && nextSpdT === 0) {
         const oldEff = getEffectiveSpd(h);
         const newEff = getEffectiveSpd(next);
@@ -1327,25 +2033,33 @@ export default function App() {
     });
   };
 
-  const tickMonsterDebuffsOnEndTurn = (mList) =>
-    mList.map((m) => {
-      if (m.curHp <= 0) return m;
+  const tickMonsterDebuffsOnEndTurn = (mList, endedMonsterId = null) => {
+    if (!endedMonsterId) return mList;
+    return mList.map((m) => {
+      if (m.curHp <= 0 || m.id !== endedMonsterId) return m;
       const oldEff = getEffectiveSpd(m);
       const nextDef = Math.max(0, (m.defDownTurns ?? 0) - 1);
       const nextMdef = Math.max(0, (m.mdefDownTurns ?? 0) - 1);
       const nextAtkT = Math.max(0, (m.atkDownTurns ?? 0) - 1);
       const nextSpdT = Math.max(0, (m.spdDownTurns ?? 0) - 1);
+      const nextAtkBuffT = Math.max(0, (m.atkBuffTurns ?? 0) - 1);
+      const nextDefBuffT = Math.max(0, (m.defBuffTurns ?? 0) - 1);
       let next = {
         ...m,
         defDownTurns: nextDef,
         mdefDownTurns: nextMdef,
         atkDownTurns: nextAtkT,
         spdDownTurns: nextSpdT,
+        atkBuffTurns: nextAtkBuffT,
+        atkBuffMul: nextAtkBuffT > 0 ? (m.atkBuffMul ?? 1) : 1,
+        defBuffTurns: nextDefBuffT,
+        defBuffMul: nextDefBuffT > 0 ? (m.defBuffMul ?? 1) : 1,
       };
       const newEff = getEffectiveSpd(next);
       const av = rescaleAvForSpdChange(m.av, oldEff, newEff);
       return { ...next, av };
     });
+  };
 
   const buildUnitEffects = (u) => {
     if (!u) return [];
@@ -1411,6 +2125,13 @@ export default function App() {
       if ((u.jackDrawBuffTurns ?? 0) > 0) {
         out.push({ kind: 'buff', label: `抽牌（${u.jackDrawBuffTurns}）` });
       }
+      if ((u.skillCritTurns ?? 0) > 0) {
+        out.push({ kind: 'buff', label: `術式爆擊（${u.skillCritTurns}）` });
+      }
+      if ((u.weaknessSeenDmgTurns ?? 0) > 0 && (u.weaknessSeenDmgMul ?? 1) > 1) {
+        const pct = Math.round(((u.weaknessSeenDmgMul ?? 1) - 1) * 100);
+        out.push({ kind: 'buff', label: `看破特攻 +${pct}%（${u.weaknessSeenDmgTurns}）` });
+      }
 
       if ((u.tauntTurns ?? 0) > 0) out.push({ kind: 'buff', label: `嘲諷×${u.tauntTurns}` });
 
@@ -1438,7 +2159,26 @@ export default function App() {
       if ((u.dazzleTurns ?? 0) > 0) {
         out.push({ kind: 'debuff', label: `眩目（${u.dazzleTurns}）` });
       }
+      if ((u.stunTurns ?? 0) > 0) {
+        out.push({ kind: 'debuff', label: `暈眩（${u.stunTurns}）` });
+      }
+      if ((u.stunImmuneTurns ?? 0) > 0) {
+        out.push({ kind: 'debuff', label: `暈眩免疫（${u.stunImmuneTurns}）` });
+      }
+      if (u.deathMark) {
+        out.push({ kind: 'debuff', label: '死亡標記' });
+      }
     } else {
+      if ((u.atkBuffTurns ?? 0) > 0) {
+        const mul = u.atkBuffMul ?? 1;
+        const pct = Math.round((mul - 1) * 100);
+        out.push({ kind: 'buff', label: `攻擊↑${pct}%（${u.atkBuffTurns}）` });
+      }
+      if ((u.defBuffTurns ?? 0) > 0) {
+        const mul = u.defBuffMul ?? 1;
+        const pct = Math.round((mul - 1) * 100);
+        out.push({ kind: 'buff', label: `物防↑${pct}%（${u.defBuffTurns}）` });
+      }
       if ((u.defDownTurns ?? 0) > 0) {
         const mul = u.defDownMul ?? 1;
         const pct = Math.round((1 - mul) * 100);
@@ -1464,6 +2204,10 @@ export default function App() {
         if (w) out.push({ kind: 'debuff', label: `弱點：${w}` });
       }
 
+      if ((u.skillCritTurns ?? 0) > 0) {
+        out.push({ kind: 'buff', label: `術式爆擊（${u.skillCritTurns}）` });
+      }
+
       if ((u.burnTurns ?? 0) > 0 && (u.burnStacks ?? 0) > 0) {
         out.push({ kind: 'debuff', label: `燃燒×${u.burnStacks}（${u.burnTurns}）` });
       }
@@ -1479,6 +2223,15 @@ export default function App() {
       if ((u.dazzleTurns ?? 0) > 0) {
         out.push({ kind: 'debuff', label: `眩目（${u.dazzleTurns}）` });
       }
+      if ((u.stunTurns ?? 0) > 0) {
+        out.push({ kind: 'debuff', label: `暈眩（${u.stunTurns}）` });
+      }
+      if ((u.stunImmuneTurns ?? 0) > 0) {
+        out.push({ kind: 'debuff', label: `暈眩免疫（${u.stunImmuneTurns}）` });
+      }
+      if (u.deathMark) {
+        out.push({ kind: 'debuff', label: '死亡標記' });
+      }
     }
 
     return out;
@@ -1493,6 +2246,15 @@ export default function App() {
     if (e.type === 'debuffTurnsPlus') return `戰鬥機制：我方技能對敵人施加的弱化持續回合 +${e.value ?? 0}。`;
     if (e.type === 'jackDrawSustainMp') {
       return `戰鬥機制：帶有「抽牌」強化（怪盜洗牌）期間，每回合行動開始額外回復 ${e.value ?? 0} MP。`;
+    }
+    if (e.type === 'dmgVsAilmentedEnemyMul') {
+      const pct = Math.round(((e.mul ?? 1) - 1) * 100);
+      return `戰鬥機制：對持有異常狀態的敵人造成的傷害提高約 ${pct}%（與其他倍率相乘）。`;
+    }
+    if (e.type === 'critRateByBuffCount') {
+      const per = typeof e.perBuffAdd === 'number' ? e.perBuffAdd : 0;
+      const max = typeof e.maxAdd === 'number' ? e.maxAdd : 0;
+      return `戰鬥機制：自身擁有的增益越多，爆擊率越高（每個增益 +${Math.round(per * 100)}%，最多 +${Math.round(max * 100)}%）。`;
     }
     if (e.type === 'selfCritDmgMul') {
       const pct = Math.round(((e.value ?? 1) - 1) * 100);
@@ -1571,9 +2333,10 @@ export default function App() {
     );
   };
 
-  const describeSkillEffect = (skill) => {
+  const describeSkillEffect = (skill, opts = null) => {
     const e = skill?.effect;
     if (!e) return '（無效果資料）';
+    const masteryPct = Math.max(0, Math.floor(Number(opts?.masteryPct) || 0));
     const pctOf = (mul) => `${Math.round((mul ?? 1) * 100)}%`;
     const scale = skill?.scale ?? 'matk';
     const scaleBadge =
@@ -1597,6 +2360,25 @@ export default function App() {
       const hasSplash = splashMul != null;
       const dmgLabel =
         e.target === 'enemy-all' ? '敵方全體傷害：' : hasSplash ? '敵方單體主目標：' : '敵方單體傷害：';
+      const ail = e.ailment ?? null;
+      const ailBadge =
+        ail?.type === 'poison' ? (
+          <span className="inline-flex items-center gap-1 text-emerald-200 font-black">
+            ＋中毒（{ail.turns ?? 3} 回合{typeof ail.chance === 'number' ? `，${Math.round(ail.chance * 100)}%` : ''}）
+          </span>
+        ) : ail?.type === 'burn' ? (
+          <span className="inline-flex items-center gap-1 text-orange-200 font-black">
+            ＋燃燒×{ail.stacks ?? 1}{typeof ail.chance === 'number' ? `（${Math.round(ail.chance * 100)}%）` : ''}
+          </span>
+        ) : ail?.type === 'darkness' ? (
+          <span className="inline-flex items-center gap-1 text-slate-200 font-black">
+            ＋黑暗（{ail.turns ?? 2} 回合{typeof ail.chance === 'number' ? `，${Math.round(ail.chance * 100)}%` : ''}）
+          </span>
+        ) : ail?.type === 'stun' ? (
+          <span className="inline-flex items-center gap-1 text-amber-200 font-black">
+            ＋暈眩（{ail.turns ?? 1} 回合{typeof ail.chance === 'number' ? `，${Math.round(ail.chance * 100)}%` : ''}）
+          </span>
+        ) : null;
       const deb = e.debuff;
       const debuffBadge =
         deb?.stat === 'atk' && typeof deb.mul === 'number' ? (
@@ -1639,24 +2421,28 @@ export default function App() {
             ＋敵方全體眩目（{e.dazzleAll.turns} 回合）
           </span>
         ) : null;
+      const extraBadges = [splashBadge, debuffBadge, dazzleAllBadge, ailBadge, selfOnBadge].filter(Boolean);
       return (
-        <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-1">
-          <span>{dmgLabel}</span>
-          <span className="font-black text-cyan-200 tabular-nums">{pctOf(mul)}</span>
-          {scaleBadge}
-          {splashBadge}
-          {debuffBadge}
-          {dazzleAllBadge}
-          {selfOnBadge}
-        </span>
+        <div className="space-y-0.5">
+          <div className="inline-flex items-center gap-x-1.5 whitespace-nowrap">
+            <span>{dmgLabel}</span>
+            <span className="font-black text-cyan-200 tabular-nums">{pctOf(mul)}</span>
+            {masteryPct > 0 ? <span className="font-black text-amber-200/90 tabular-nums">+ {masteryPct}%</span> : null}
+            {scaleBadge}
+          </div>
+          {extraBadges.length ? (
+            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">{extraBadges}</div>
+          ) : null}
+        </div>
       );
     }
     if (e.type === 'heal') {
       const mul = e.powerMul ?? 1;
       return (
-        <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-1">
+        <span className="inline-flex items-center gap-x-1.5 whitespace-nowrap">
           <span>治療我方單體：</span>
           <span className="font-black text-cyan-200 tabular-nums">{pctOf(mul)}</span>
+          {masteryPct > 0 ? <span className="font-black text-amber-200/90 tabular-nums">+ {masteryPct}%</span> : null}
           {scaleBadge}
         </span>
       );
@@ -1676,6 +2462,10 @@ export default function App() {
     if (e.type === 'buff' && e.stat === 'atk+matk') {
       const pct = Math.round(((e.mul ?? 1) - 1) * 100);
       return `我方全體攻擊/魔力提升 +${pct}%（${e.turns ?? 1} 回合）`;
+    }
+    if (e.type === 'buff' && e.stat === 'matk' && e.target === 'ally-all') {
+      const pct = Math.round(((e.mul ?? 1) - 1) * 100);
+      return `我方全體魔力提升 +${pct}%（${e.turns ?? 1} 回合）`;
     }
     if (e.type === 'buff' && e.stat === 'spd' && e.target === 'ally-all') {
       const pct = Math.round(((e.mul ?? 1) - 1) * 100);
@@ -1705,7 +2495,9 @@ export default function App() {
     }
     if (e.type === 'debuff' && e.stat === 'spd' && e.target === 'enemy-single') {
       const pct = Math.round((1 - (e.mul ?? 1)) * 100);
-      return `敵方單體速度降低 ${pct}%（${e.turns ?? 1} 回合）`;
+      const ail = e.ailment ?? null;
+      const ailText = ail?.type === 'darkness' ? `，並附加黑暗（${ail.turns ?? 2} 回合）` : '';
+      return `敵方單體速度降低 ${pct}%（${e.turns ?? 1} 回合）${ailText}`;
     }
     if (e.type === 'regen') {
       const mul = e.powerMul ?? 0.2;
@@ -1734,6 +2526,18 @@ export default function App() {
     if (e.type === 'jackPhantomDrawAll') {
       const pct = Math.round(((e.mul ?? 1.12) - 1) * 100);
       return `怪盜式發牌：我方全體各隨機獲得攻／防／魔力／魔抗其中一項 +${pct}%（${e.turns ?? 3} 回合，同次不重複）`;
+    }
+    if (e.type === 'halloweenTrickOrTreat') {
+      return `敵方全體：隨機獲得燃燒或中毒（${e.enemyTurns ?? 2} 回合）；我方全體：隨機獲得爆擊率或爆擊傷害提升（${e.allyTurns ?? 2} 回合）。`;
+    }
+    if (e.type === 'deathMark') {
+      return '賦予敵方單體「死亡標記」：該目標死亡時，對其陣營的隨機友軍造成其最大 HP 20% 的傷害。';
+    }
+    if (e.type === 'skillCritBuff') {
+      return `我方單體：獲得「術式爆擊」（魔攻／複合技能可爆擊，${e.turns ?? 2} 回合）`;
+    }
+    if (e.type === 'sunflowerShot') {
+      return `可選擇敵人或隊友：對敵造成 ${pctOf(e.dmgPowerMul ?? 1)} 傷害；對友治療 ${pctOf(e.healPowerMul ?? 1)}。`;
     }
     return `效果：${e.type}`;
   };
@@ -1786,6 +2590,9 @@ export default function App() {
         const newEff = getEffectiveSpd(next);
         return { ...next, av: rescaleAvForSpdChange(h.av, oldEff, newEff) };
       }
+      if (def.kind === 'matk') {
+        return { ...h, matkBuffTurns: def.turns, matkBuffMul: def.mulMatk };
+      }
       return {
         ...h,
         atkBuffTurns: def.turns,
@@ -1794,16 +2601,19 @@ export default function App() {
         matkBuffMul: def.mulMatk !== 1 ? def.mulMatk : (h.matkBuffMul ?? 1),
       };
     });
-    const jackGiftMpAll = activeUnit.id === 'h9' ? getAllyMpOnBuffFromSelfFromTalents(talentMap, 'h9') : 0;
+    const jackGiftMpAll = activeUnit.id === 'jack' ? getAllyMpOnBuffFromSelfFromTalents(talentMap, 'jack') : 0;
     if (jackGiftMpAll > 0) {
       newH0 = newH0.map((h) =>
-        h.curHp > 0 && h.id !== 'h9' ? { ...h, curMp: Math.min(MP_MAX, (h.curMp ?? 0) + jackGiftMpAll) } : h
+        h.curHp > 0 && h.id !== 'jack' ? { ...h, curMp: Math.min(MP_MAX, (h.curMp ?? 0) + jackGiftMpAll) } : h
       );
     }
     setHeroes(newH0);
     if (def.kind === 'spd') {
       const spdPct = Math.round((def.mulSpd - 1) * 100);
       setLogs([`${activeUnit.name} 施放「${skill.name}」：全隊速度提升（${spdPct}%），${def.turns} 回合`, ...logs].slice(0, 5));
+    } else if (def.kind === 'matk') {
+      const matkPct = Math.round((def.mulMatk - 1) * 100);
+      setLogs([`${activeUnit.name} 施放「${skill.name}」：全隊魔力提升（${matkPct}%），${def.turns} 回合`, ...logs].slice(0, 5));
     } else {
       const atkPct = Math.round((def.mulAtk - 1) * 100);
       const matkPct = Math.round((def.mulMatk - 1) * 100);
@@ -1868,7 +2678,7 @@ export default function App() {
   };
 
   const castJackPhantomDrawAll = async (skill) => {
-    if (!activeUnit?.isHero || activeUnit.id !== 'h9') return;
+    if (!activeUnit?.isHero || activeUnit.id !== 'jack') return;
     const eff = skill?.effect;
     if (!eff || eff.type !== 'jackPhantomDrawAll') return;
     unlockAudio();
@@ -1909,10 +2719,10 @@ export default function App() {
       if (kind === 'def') return { ...h, ...basePatch, defBuffTurns: turns, defBuffMul: mul };
       return { ...h, ...basePatch, mdefBuffTurns: turns, mdefBuffMul: mul };
     });
-    const jackGiftMpDraw = getAllyMpOnBuffFromSelfFromTalents(talentMap, 'h9');
+    const jackGiftMpDraw = getAllyMpOnBuffFromSelfFromTalents(talentMap, 'jack');
     if (jackGiftMpDraw > 0) {
       newH0 = newH0.map((h) =>
-        h.curHp > 0 && h.id !== 'h9' ? { ...h, curMp: Math.min(MP_MAX, (h.curMp ?? 0) + jackGiftMpDraw) } : h
+        h.curHp > 0 && h.id !== 'jack' ? { ...h, curMp: Math.min(MP_MAX, (h.curMp ?? 0) + jackGiftMpDraw) } : h
       );
     }
     setHeroes(newH0);
@@ -1928,9 +2738,54 @@ export default function App() {
     advanceTurn(newH, monsters, activeUnit.id);
   };
 
+  const castHalloweenTrickOrTreat = async (skill) => {
+    if (!activeUnit?.isHero) return;
+    const eff = skill?.effect;
+    if (!eff || eff.type !== 'halloweenTrickOrTreat') return;
+    unlockAudio();
+    SFX.skill();
+    const mpCost = getSkillMpCostForCaster(skill, activeUnit);
+    if (activeUnit.curMp < mpCost) {
+      setLogs([`MP 不足，無法施放「${skill.name}」（需 ${mpCost}）`, ...logs].slice(0, 5));
+      return;
+    }
+    const enemyTurns = Math.max(1, Math.floor(Number(eff.enemyTurns) || 2));
+    const allyTurns = Math.max(1, Math.floor(Number(eff.allyTurns) || 2));
+
+    setIsProcessing(true);
+    const doubleDot = activeUnit.id === 'butiya_halloween' && hasDoubleDotFromSelfTalent(talentMap, 'butiya_halloween');
+    const newM0 = monsters.map((m) => {
+      if (m.curHp <= 0) return m;
+      const roll = Math.random() < 0.5 ? 'burn' : 'poison';
+      if (roll === 'burn') {
+        const next = applyBurnOnTarget(m, 1);
+        return { ...next, burnTurns: Math.max(next.burnTurns ?? 0, enemyTurns), burnDmgMul: doubleDot ? 2 : (next.burnDmgMul ?? 1) };
+      }
+      const next = applyPoisonOnTarget(m, enemyTurns);
+      return { ...next, poisonDmgMul: doubleDot ? 2 : (next.poisonDmgMul ?? 1) };
+    });
+    const newM = applyLavaCoreDeathBonusStrip(newM0);
+    setMonsters(newM);
+
+    const newH0 = heroes.map((h) => {
+      if (h.curHp <= 0) return h;
+      const roll = Math.random() < 0.5 ? 'critRate' : 'critDmg';
+      if (roll === 'critRate') return { ...h, critRateBuffTurns: allyTurns, critRateBuffAdd: CRIT_RATE_MID_ADD };
+      return { ...h, critDmgBuffTurns: allyTurns, critDmgBuffMul: CRIT_DMG_SMALL_MUL };
+    });
+    setHeroes(newH0);
+
+    setLogs([`${activeUnit.name} 施放「${skill.name}」：敵方全體隨機獲得 燃燒/中毒（${enemyTurns} 回合），我方全體隨機獲得 爆擊率/爆擊傷害提升（${allyTurns} 回合）`, ...logs].slice(0, 5));
+    const newH = endHeroAction(newH0, { mpCost });
+    await new Promise((r) => setTimeout(r, 600));
+    if (newM.every((m) => m.curHp <= 0)) grantVictory(newM);
+    else advanceTurn(newH, newM, activeUnit.id);
+  };
+
   const castTauntSelf = async (skill) => {
     if (!activeUnit?.isHero) return;
     const turns = Math.max(1, skill?.effect?.turns ?? 3);
+    const selfRegen = skill?.effect?.selfRegen ?? null;
     const mpCost = getSkillMpCostForCaster(skill, activeUnit);
     if (activeUnit.curMp < mpCost) {
       setLogs([`MP 不足，無法施放「${skill.name}」（需 ${mpCost}）`, ...logs].slice(0, 5));
@@ -1939,9 +2794,18 @@ export default function App() {
     unlockAudio();
     SFX.skill();
     setIsProcessing(true);
-    const newH0 = heroes.map((h) => (h.id === activeUnit.id && h.curHp > 0 ? { ...h, tauntTurns: turns } : h));
+    let newH0 = heroes.map((h) => (h.id === activeUnit.id && h.curHp > 0 ? { ...h, tauntTurns: turns } : h));
+    if (selfRegen && typeof selfRegen === 'object') {
+      const rTurns = Math.max(1, Math.floor(Number(selfRegen.turns) || 1));
+      const healPer = resolveRegenHealPerTick(activeUnit, { powerMul: selfRegen.powerMul ?? 0.2 });
+      newH0 = newH0.map((h) =>
+        h.id === activeUnit.id && h.curHp > 0
+          ? { ...h, regenTurns: Math.max(h.regenTurns ?? 0, rTurns), regenHeal: Math.max(h.regenHeal ?? 0, healPer) }
+          : h
+      );
+    }
     setHeroes(newH0);
-    setLogs([`${activeUnit.name} 施放「${skill.name}」：嘲諷 ${turns} 回合`, ...logs].slice(0, 5));
+    setLogs([`${activeUnit.name} 施放「${skill.name}」：嘲諷 ${turns} 回合${selfRegen ? '，並獲得緩回' : ''}`, ...logs].slice(0, 5));
     const newH = endHeroAction(newH0, { mpCost });
     await new Promise((r) => setTimeout(r, 600));
     advanceTurn(newH, monsters, activeUnit.id);
@@ -1993,6 +2857,7 @@ export default function App() {
     clearIf((next.poisonTurns ?? 0) > 0, { poisonTurns: 0 }, '中毒');
     clearIf((next.burnTurns ?? 0) > 0 || (next.burnStacks ?? 0) > 0, { burnTurns: 0, burnStacks: 0 }, '燃燒');
     clearIf((next.freezeTurns ?? 0) > 0, { freezeTurns: 0 }, '冰凍');
+    clearIf((next.stunTurns ?? 0) > 0, { stunTurns: 0 }, '暈眩');
     clearIf((next.darknessTurns ?? 0) > 0, { darknessTurns: 0 }, '黑暗');
     clearIf((next.dazzleTurns ?? 0) > 0, { dazzleTurns: 0 }, '眩目');
     clearIf((next.tauntTurns ?? 0) > 0, { tauntTurns: 0 }, '嘲諷');
@@ -2081,10 +2946,12 @@ export default function App() {
 
     setIsProcessing(true);
     const alive = monsters.filter((m) => m.curHp > 0);
+    const masteryMul = activeUnit?.id && skill?.id ? getSkillPowerMulFromMastery(skillMasteryMap, activeUnit.id, skill.id) : 1;
     const hits = alive.map((m) => {
-      const r = resolveSkillDamage({ caster: activeUnit, target: m, skill, getDamage });
+      const r = resolveSkillDamage({ caster: activeUnit, target: m, skill, getDamage, powerMulOverride: masteryMul });
       return { id: m.id, dmg: r.damage, crit: r.crit };
     });
+    const onHitAilment = effect?.ailment ?? null;
     const debuff = effect?.debuff;
     const extraTurns = activeUnit?.passive?.effect?.type === 'debuffTurnsPlus' ? (activeUnit.passive.effect.value ?? 0) : 0;
     const applyAtkDown = !!debuff && debuff.stat === 'atk' && debuff.target === 'enemy-all' && typeof debuff.mul === 'number';
@@ -2110,27 +2977,49 @@ export default function App() {
         ...(applyAtkDown ? { atkDownTurns, atkDownMul } : {}),
         ...(talentMdefDown ? { mdefDownTurns: talentMdefDown.turns, mdefDownMul: talentMdefDown.mul } : {}),
       };
+      if (onHitAilment && u.curHp > 0) {
+        const chanceAdd =
+          onHitAilment.type && skill?.id
+            ? getSkillAilmentChanceAddFromTalents({
+                talentMap,
+                casterHeroId: activeUnit.id,
+                skillId: skill.id,
+                ailmentType: onHitAilment.type,
+              })
+            : 0;
+        const chanceBase = typeof onHitAilment.chance === 'number' ? onHitAilment.chance : null;
+        const affixHit = typeof activeUnit?.affixCcHitAdd === 'number' ? activeUnit.affixCcHitAdd : 0;
+        const affixRes = typeof u?.affixAilResistAdd === 'number' ? u.affixAilResistAdd : 0;
+        const chance = chanceBase == null ? null : Math.max(0, Math.min(1, chanceBase + chanceAdd + affixHit - affixRes));
+        const ok = chance == null ? true : Math.random() < chance;
+        if (ok) {
+          if (onHitAilment.type === 'poison') u = applyPoisonOnTarget(u, onHitAilment.turns);
+          else if (onHitAilment.type === 'burn') u = applyBurnOnTarget(u, onHitAilment.stacks);
+          else if (onHitAilment.type === 'darkness') u = applyDarknessOnTarget(u, onHitAilment.turns);
+          else if (onHitAilment.type === 'stun') u = applyStunOnTarget(u, onHitAilment.turns);
+        }
+      }
       if (dazzleTurnsAll > 0 && u.curHp > 0) u = applyDazzleOnTarget(u, dazzleTurnsAll);
       return u;
     });
 
     // 傑克專屬：暴擊竊取隨機增益（全體技：取第一個暴擊目標，竊取一次）
-    if (activeUnit?.isHero && activeUnit.id === 'h9' && canCritStealRandomBuffFromEnemyFromTalents(talentMap, 'h9')) {
+    if (activeUnit?.isHero && activeUnit.id === 'jack' && canCritStealRandomBuffFromEnemyFromTalents(talentMap, 'jack')) {
       const critHit = hits.find((h) => h.crit);
       if (critHit?.id) {
-        const res = stealRandomBuffFromMonsterToHero({ heroId: 'h9', monsterId: critHit.id, monstersList: newM0 });
+        const res = stealRandomBuffFromMonsterToHero({ heroId: 'jack', monsterId: critHit.id, monstersList: newM0 });
         if (res.ok) {
           setHeroes(res.heroesNext);
           // overwrite monster list before strip
           for (let i = 0; i < newM0.length; i += 1) {
             newM0[i] = res.monstersNext[i];
           }
-          setLogs([`怪盜風・掠光竊印：竊取敵方「${res.stolen}」增益`, ...logs].slice(0, 5));
+          setLogs([`掠光竊印：竊取敵方「${res.stolen}」增益`, ...logs].slice(0, 5));
         }
       }
     }
-    const coreWasAlive = monsters.some((m) => monsterTemplateId(m.id) === 'c4-lava-core' && m.curHp > 0);
-    const coreNowDead = !newM0.some((m) => monsterTemplateId(m.id) === 'c4-lava-core' && m.curHp > 0);
+    const coreWasAlive = monsters.some((m) => isLavaCoreTemplateId(monsterTemplateId(m.id)) && m.curHp > 0);
+    const coreNowDead = !newM0.some((m) => isLavaCoreTemplateId(monsterTemplateId(m.id)) && m.curHp > 0);
     const newM = applyLavaCoreDeathBonusStrip(newM0);
     const shellCracked = coreWasAlive && coreNowDead;
     setMonsters(newM);
@@ -2147,30 +3036,98 @@ export default function App() {
       ].slice(0, 5),
     );
     const newH = endHeroAction(heroes, { mpCost });
+    if (activeUnit?.id && skill?.id) {
+      setSkillMasteryMap((prev) => incSkillUses(prev, activeUnit.id, skill.id, 1));
+      setDailyQ((s) => {
+        const qid = 'skill_casts';
+        if (!s?.picked?.includes(qid)) return s;
+        const def = DAILY_QUEST_DEFS[qid];
+        const now = loadDailyQuestsState();
+        if (now.date !== s.date) return now;
+        const p = Math.max(0, Number(s.prog?.[qid] ?? 0));
+        return { ...s, prog: { ...(s.prog ?? {}), [qid]: Math.min(def.target, p + 1) } };
+      });
+    }
     await new Promise((r) => setTimeout(r, 600));
     if (newM.every((m) => m.curHp <= 0)) grantVictory(newM);
     else advanceTurn(newH, newM, activeUnit.id);
   };
 
   const onHeroTargetSelect = async (hId) => {
-    if (targetMode !== 'skill-ally' || isProcessing || !activeUnit?.isHero || !pickedSkill) return;
+    if ((targetMode !== 'skill-ally' && targetMode !== 'skill-flex') || isProcessing || !activeUnit?.isHero || !pickedSkill) return;
     unlockAudio();
     SFX.skill();
     const t = getSkillTargeting(pickedSkill);
-    if (t.side !== 'ally') return;
+    if (t.side !== 'ally' && t.side !== 'both') return;
 
     const target = heroes.find((h) => h.id === hId);
     if (!target || target.curHp <= 0) return;
 
-    const baseMpCost = pickedSkill?.mpCost ?? 0;
-    const mpDiscount = activeUnit?.isHero ? getR4SkillMpDiscount(activeUnit.id) : 0;
-    const mpCost = Math.max(1, baseMpCost - mpDiscount);
+    const mpCost = getSkillMpCostForCaster(pickedSkill, activeUnit);
     if (activeUnit.curMp < mpCost) {
       setLogs([`MP 不足，無法施放「${pickedSkill.name}」（需 ${mpCost}）`, ...logs].slice(0, 5));
       return;
     }
 
     setIsProcessing(true);
+
+    if (pickedSkill?.effect?.type === 'skillCritBuff') {
+      const turns = Math.max(1, pickedSkill.effect.turns ?? 2);
+      const scales = Array.isArray(pickedSkill.effect.scales) ? pickedSkill.effect.scales : ['matk', 'mix'];
+      const newH0 = heroes.map((h) =>
+        h.id === hId && h.curHp > 0 ? { ...h, skillCritTurns: turns, skillCritScales: scales } : h
+      );
+      setHeroes(newH0);
+      setLogs([`${activeUnit.name} 施放「${pickedSkill.name}」：${target.name} 獲得「術式爆擊」（${turns} 回合）`, ...logs].slice(0, 5));
+      const newH = endHeroAction(newH0, { mpCost });
+      if (activeUnit?.id && pickedSkill?.id) {
+        setSkillMasteryMap((prev) => incSkillUses(prev, activeUnit.id, pickedSkill.id, 1));
+        setDailyQ((s) => {
+          const qid = 'skill_casts';
+          if (!s?.picked?.includes(qid)) return s;
+          const def = DAILY_QUEST_DEFS[qid];
+          const now = loadDailyQuestsState();
+          if (now.date !== s.date) return now;
+          const p = Math.max(0, Number(s.prog?.[qid] ?? 0));
+          return { ...s, prog: { ...(s.prog ?? {}), [qid]: Math.min(def.target, p + 1) } };
+        });
+      }
+      await new Promise((r) => setTimeout(r, 600));
+      advanceTurn(newH, monsters, activeUnit.id);
+      return;
+    }
+
+    if (pickedSkill?.effect?.type === 'sunflowerShot') {
+      const healSkill = { scale: 'matk', effect: { type: 'heal', target: 'ally-single', powerMul: pickedSkill.effect.healPowerMul ?? 1 } };
+      let heal = resolveSkillHeal({ caster: activeUnit, target, skill: healSkill }).heal;
+      const incMul = getIncomingHealMulFromTalents(talentMap, hId);
+      if (incMul !== 1) heal = Math.max(1, Math.floor(heal * incMul));
+      const mpFlat = getHealTargetMpFlatFromTalents(talentMap, activeUnit.id);
+      const newH0 = heroes.map((h) =>
+        h.id === hId
+          ? { ...h, curHp: Math.min(h.hp, h.curHp + heal), curMp: Math.min(MP_MAX, (h.curMp ?? 0) + mpFlat) }
+          : h
+      );
+      setHeroes(newH0);
+      setLogs([`${activeUnit.name} 使用「${pickedSkill.name}」：${target.name} 回復 +${heal}`, ...logs].slice(0, 5));
+      const newH = endHeroAction(newH0, { mpCost });
+      if (activeUnit?.id && pickedSkill?.id) {
+        setSkillMasteryMap((prev) => incSkillUses(prev, activeUnit.id, pickedSkill.id, 1));
+        setDailyQ((s) => {
+          const qid = 'skill_casts';
+          if (!s?.picked?.includes(qid)) return s;
+          const def = DAILY_QUEST_DEFS[qid];
+          const now = loadDailyQuestsState();
+          if (now.date !== s.date) return now;
+          const p = Math.max(0, Number(s.prog?.[qid] ?? 0));
+          return { ...s, prog: { ...(s.prog ?? {}), [qid]: Math.min(def.target, p + 1) } };
+        });
+      }
+      await new Promise((r) => setTimeout(r, 600));
+      advanceTurn(newH, monsters, activeUnit.id);
+      return;
+    }
+
     const singleBuff = getBuffSingleDef(pickedSkill);
     if (singleBuff) {
       const turnsBonus = getBuffTurnsBonusFromTalents(talentMap, activeUnit.id);
@@ -2186,8 +3143,8 @@ export default function App() {
             }
           : h
       );
-      const jackGiftMpOne = activeUnit.id === 'h9' ? getAllyMpOnBuffFromSelfFromTalents(talentMap, 'h9') : 0;
-      if (jackGiftMpOne > 0 && hId !== 'h9') {
+      const jackGiftMpOne = activeUnit.id === 'jack' ? getAllyMpOnBuffFromSelfFromTalents(talentMap, 'jack') : 0;
+      if (jackGiftMpOne > 0 && hId !== 'jack') {
         newH0 = newH0.map((h) =>
           h.id === hId && h.curHp > 0 ? { ...h, curMp: Math.min(MP_MAX, (h.curMp ?? 0) + jackGiftMpOne) } : h
         );
@@ -2201,14 +3158,34 @@ export default function App() {
         ].slice(0, 5)
       );
       const newH = endHeroAction(newH0, { mpCost });
+      if (activeUnit?.id && pickedSkill?.id) {
+        setSkillMasteryMap((prev) => incSkillUses(prev, activeUnit.id, pickedSkill.id, 1));
+        setDailyQ((s) => {
+          const qid = 'skill_casts';
+          if (!s?.picked?.includes(qid)) return s;
+          const def = DAILY_QUEST_DEFS[qid];
+          const now = loadDailyQuestsState();
+          if (now.date !== s.date) return now;
+          const p = Math.max(0, Number(s.prog?.[qid] ?? 0));
+          return { ...s, prog: { ...(s.prog ?? {}), [qid]: Math.min(def.target, p + 1) } };
+        });
+      }
       await new Promise((r) => setTimeout(r, 600));
       advanceTurn(newH, monsters, activeUnit.id);
       return;
     }
 
-    const heal = resolveSkillHeal({ caster: activeUnit, target, skill: pickedSkill }).heal;
+    let heal = resolveSkillHeal({ caster: activeUnit, target, skill: pickedSkill }).heal;
+    if (activeUnit?.id === 'bubu' || activeUnit?.id === 'bubu_harvest') {
+      const healMul = getOutgoingHealMulFromTalents(talentMap, activeUnit.id);
+      if (healMul !== 1) heal = Math.max(1, Math.floor(heal * healMul));
+    }
+    {
+      const incMul = getIncomingHealMulFromTalents(talentMap, hId);
+      if (incMul !== 1) heal = Math.max(1, Math.floor(heal * incMul));
+    }
     const healPassive = activeUnit?.passive?.effect?.type === 'healGivesBarrier' ? activeUnit.passive.effect : null;
-    const newH0 = heroes.map((h) => {
+    let newH0 = heroes.map((h) => {
       if (h.id !== hId) return h;
       const next = { ...h, curHp: Math.min(h.hp, h.curHp + heal) };
       if (healPassive) {
@@ -2218,10 +3195,41 @@ export default function App() {
       }
       return next;
     });
+    if (activeUnit?.id === 'bubu_harvest') {
+      const mpFlat = getHealTargetMpFlatFromTalents(talentMap, 'bubu_harvest');
+      if (mpFlat > 0) {
+        newH0 = newH0.map((h) => (h.id === hId && h.curHp > 0 ? { ...h, curMp: Math.min(MP_MAX, (h.curMp ?? 0) + mpFlat) } : h));
+      }
+    }
+    let chainLine = '';
+    if (activeUnit?.id === 'bubu') {
+      const chain = getChainHealOnHealFromTalents(talentMap, 'bubu');
+      if (chain && Math.random() < chain.chance) {
+        const pool = newH0.filter((h) => h.curHp > 0 && h.id !== hId);
+        if (pool.length > 0) {
+          const pick = pool[Math.floor(Math.random() * pool.length)];
+          const splash = Math.max(1, Math.floor(heal * chain.ratio));
+          newH0 = newH0.map((h) => (h.id === pick.id ? { ...h, curHp: Math.min(h.hp, h.curHp + splash) } : h));
+          chainLine = `；連環祝福：${pick.name} +${splash}`;
+        }
+      }
+    }
     setHeroes(newH0);
-    setLogs([`${activeUnit.name} 施放「${pickedSkill.name}」治療 ${target.name} +${heal}`, ...logs].slice(0, 5));
+    setLogs([`${activeUnit.name} 施放「${pickedSkill.name}」治療 ${target.name} +${heal}${chainLine}`, ...logs].slice(0, 5));
 
     const newH = endHeroAction(newH0, { mpCost });
+    if (activeUnit?.id && pickedSkill?.id) {
+      setSkillMasteryMap((prev) => incSkillUses(prev, activeUnit.id, pickedSkill.id, 1));
+      setDailyQ((s) => {
+        const qid = 'skill_casts';
+        if (!s?.picked?.includes(qid)) return s;
+        const def = DAILY_QUEST_DEFS[qid];
+        const now = loadDailyQuestsState();
+        if (now.date !== s.date) return now;
+        const p = Math.max(0, Number(s.prog?.[qid] ?? 0));
+        return { ...s, prog: { ...(s.prog ?? {}), [qid]: Math.min(def.target, p + 1) } };
+      });
+    }
     await new Promise((r) => setTimeout(r, 600));
     advanceTurn(newH, monsters, activeUnit.id);
   };
@@ -2239,7 +3247,7 @@ export default function App() {
       unlockAudio();
       SFX.skill();
       setIsProcessing(true);
-      const dmgEach = getJackInvertedDustDamagePerEnemy();
+      const dmgEach = getJackInvertedDustDamagePerEnemy(activeUnit);
       const newM0 = monsters.map((m) => (m.curHp <= 0 ? m : { ...m, curHp: Math.max(0, m.curHp - dmgEach) }));
       const newM = applyLavaCoreDeathBonusStrip(newM0);
       setMonsters(newM);
@@ -2265,11 +3273,14 @@ export default function App() {
     unlockAudio();
     SFX.skill();
     setIsProcessing(true);
-    const amt = Math.max(1, it.effect.amount ?? 0);
+    const pct = typeof it.effect.pct === 'number' ? Math.max(0, it.effect.pct) : 0;
+    const minBase = Math.max(0, Math.floor(Number(it.effect.min) || 0));
     const newH0 = heroes.map((h) => {
       if (h.curHp <= 0) return h;
       const poisonMul = getIncomingHealMulFromPoison(h);
-      const healAmt = Math.max(1, Math.floor(amt * poisonMul));
+      const incMul = getIncomingHealMulFromTalents(talentMap, h.id);
+      const base = pct > 0 ? Math.floor((h.hp ?? 1) * pct) : Math.max(1, Math.floor(Number(it.effect.amount) || 0));
+      const healAmt = Math.max(1, Math.floor(Math.max(minBase, base) * poisonMul * incMul));
       return { ...h, curHp: Math.min(h.hp, h.curHp + healAmt) };
     });
     const parts = newH0
@@ -2322,7 +3333,7 @@ export default function App() {
     let logLine = '';
 
     if (t === 'healHp' && it.effect?.target === 'ally-single') {
-      const { amount } = getJackInvertedSingleDamage(pickedItemId);
+      const { amount } = getJackInvertedSingleDamage(pickedItemId, activeUnit);
       newM0 = monsters.map((m) => (m.id === mId ? { ...m, curHp: Math.max(0, m.curHp - amount) } : m));
       logLine = `${activeUnit.name} 道具反轉「${it.name}」：對 ${target.name} 造成 ${amount} 傷害`;
     } else if (t === 'restoreMp') {
@@ -2332,7 +3343,7 @@ export default function App() {
       );
       logLine = `${activeUnit.name} 道具反轉「${it.name}」：${target.name} MP -${drain}`;
     } else if (t === 'cleanseOneNegative') {
-      const dmg = getJackInvertedPanaceaDamage();
+      const dmg = getJackInvertedPanaceaDamage(activeUnit);
       newM0 = monsters.map((m) => (m.id === mId ? { ...m, curHp: Math.max(0, m.curHp - dmg) } : m));
       logLine = `${activeUnit.name} 道具反轉「${it.name}」：對 ${target.name} 驅散衝擊 ${dmg}`;
     } else {
@@ -2374,9 +3385,12 @@ export default function App() {
 
     let newH0 = heroes;
     if (it.effect?.type === 'healHp' && (it.effect?.target ?? 'ally-single') === 'ally-single') {
-      const amt = Math.max(1, it.effect.amount ?? 0);
+      const pct = typeof it.effect.pct === 'number' ? Math.max(0, it.effect.pct) : 0;
+      const minBase = Math.max(0, Math.floor(Number(it.effect.min) || 0));
       const poisonMul = getIncomingHealMulFromPoison(target);
-      const healAmt = Math.max(1, Math.floor(amt * poisonMul));
+      const incMul = getIncomingHealMulFromTalents(talentMap, hId);
+      const base = pct > 0 ? Math.floor((target.hp ?? 1) * pct) : Math.max(1, Math.floor(Number(it.effect.amount) || 0));
+      const healAmt = Math.max(1, Math.floor(Math.max(minBase, base) * poisonMul * incMul));
       newH0 = heroes.map((h) => (h.id === hId ? { ...h, curHp: Math.min(h.hp, h.curHp + healAmt) } : h));
       setLogs([`${activeUnit.name} 使用「${it.name}」：${target.name} HP +${healAmt}`, ...logs].slice(0, 5));
     } else if (it.effect?.type === 'restoreMp') {
@@ -2407,6 +3421,7 @@ export default function App() {
   const onTargetSelect = async (mId) => {
     if (!targetMode || isProcessing || !activeUnit?.isHero) return;
     if (targetMode === 'skill' && !pickedSkill) return;
+    if (targetMode === 'skill-flex' && !pickedSkill) return;
     setIsProcessing(true);
 
     const target = monsters.find((m) => m.id === mId);
@@ -2415,7 +3430,7 @@ export default function App() {
       return;
     }
 
-    const isSkill = targetMode === 'skill';
+    const isSkill = targetMode === 'skill' || targetMode === 'skill-flex';
     const t = isSkill ? getSkillTargeting(pickedSkill) : null;
     if (isSkill && t?.side === 'ally') {
       setIsProcessing(false);
@@ -2430,6 +3445,20 @@ export default function App() {
       setIsProcessing(false);
       return;
     }
+
+    // 萬聖驚喜：死亡標記（不造成傷害）
+    if (isSkill && pickedSkill?.effect?.type === 'deathMark') {
+      unlockAudio();
+      SFX.skill();
+      const newM0 = monsters.map((m) => (m.id === mId && m.curHp > 0 ? { ...m, deathMark: true } : m));
+      setMonsters(newM0);
+      setLogs([`${activeUnit.name} 施放「${pickedSkill.name}」：${target.name} 被施加「死亡標記」`, ...logs].slice(0, 5));
+      const newH = endHeroAction(heroes, { mpCost });
+      await new Promise((r) => setTimeout(r, 600));
+      advanceTurn(newH, newM0, activeUnit.id);
+      return;
+    }
+
     const deb = isSkill ? getDebuffDef(pickedSkill) : null;
     const applyDebuff = !!deb && pickedSkill?.effect?.type === 'debuff';
     const extraDebuffTurns =
@@ -2441,7 +3470,22 @@ export default function App() {
     let damage = 0;
     let didCrit = false;
     let critDamageForLifesteal = 0;
-    if (applyDebuff) {
+    let multiHitLine = '';
+    if (isSkill && pickedSkill?.effect?.type === 'sunflowerShot') {
+      const mul = pickedSkill.effect.dmgPowerMul ?? 1;
+      const talentMul = getSkillDamageMulVsStunImmuneFromTalents({
+        talentMap,
+        casterHeroId: activeUnit.id,
+        skillId: pickedSkill.id,
+        target,
+      });
+      const masteryMul =
+        activeUnit?.id && pickedSkill?.id ? getSkillPowerMulFromMastery(skillMasteryMap, activeUnit.id, pickedSkill.id) : 1;
+      const r = getDamage(activeUnit, target, true, mul * talentMul * masteryMul, 'atk');
+      damage = r.damage;
+      didCrit = r.crit;
+      critDamageForLifesteal = r.crit ? r.damage : 0;
+    } else if (applyDebuff) {
       if (applyDebuffDamage) {
         const r = getDamage(activeUnit, target, true, debuffDamageMul, pickedSkill?.scale ?? 'matk');
         damage = r.damage;
@@ -2454,23 +3498,30 @@ export default function App() {
           ? getSkillMultiHitOverrideFromTalents({ talentMap, casterHeroId: activeUnit.id, skillId: pickedSkill.id })
           : null;
       const hits = Math.max(1, ov?.hits ?? 1);
-      const powerMulOverride = typeof ov?.powerMul === 'number' ? ov.powerMul : undefined;
+      const masteryMul =
+        activeUnit?.id && pickedSkill?.id ? getSkillPowerMulFromMastery(skillMasteryMap, activeUnit.id, pickedSkill.id) : 1;
+      const powerMulOverride = typeof ov?.powerMul === 'number' ? ov.powerMul * masteryMul : masteryMul;
       if (hits > 1) {
         let tmpTarget = target;
         let sum = 0;
         let anyCrit = false;
         let critSum = 0;
+        const parts = [];
+        let performed = 0;
         for (let i = 0; i < hits; i += 1) {
           const r = resolveSkillDamage({ caster: activeUnit, target: tmpTarget, skill: pickedSkill, getDamage, powerMulOverride });
           sum += r.damage;
           if (r.crit) critSum += r.damage;
           anyCrit = anyCrit || r.crit;
+          performed += 1;
+          parts.push(`${r.damage}${r.crit ? '（暴擊）' : ''}`);
           tmpTarget = { ...tmpTarget, curHp: Math.max(0, (tmpTarget.curHp ?? 0) - r.damage) };
           if ((tmpTarget.curHp ?? 0) <= 0) break;
         }
         damage = sum;
         didCrit = anyCrit;
         critDamageForLifesteal = critSum;
+        multiHitLine = performed > 1 ? `（連擊：${parts.join(' + ')} = ${sum}）` : '';
       } else {
         const r = resolveSkillDamage({ caster: activeUnit, target, skill: pickedSkill, getDamage, powerMulOverride });
         damage = r.damage;
@@ -2484,6 +3535,7 @@ export default function App() {
       critDamageForLifesteal = r.crit ? r.damage : 0;
     }
     const selfOnHit = isSkill && pickedSkill?.effect?.type === 'damage' ? pickedSkill.effect.selfOnHit : null;
+    const allyBuff = isSkill && pickedSkill?.effect?.type === 'damage' ? pickedSkill.effect.allyBuff : null;
     const baseOnHitAilment = isSkill && pickedSkill?.effect?.type === 'damage' ? (pickedSkill.effect.ailment ?? null) : null;
     const talentOnHitAilment =
       isSkill && pickedSkill?.id
@@ -2557,14 +3609,36 @@ export default function App() {
     let newM = monsters.map((m) => {
       if (m.id === mId) {
         const postHit = applyMonsterSkillHit(m, damage);
-        const postAilment =
-          onHitAilment?.type === 'poison'
-            ? applyPoisonOnTarget(postHit, onHitAilment.turns)
-            : onHitAilment?.type === 'burn'
-              ? applyBurnOnTarget(postHit, onHitAilment.stacks)
-              : onHitAilment?.type === 'darkness'
-                ? applyDarknessOnTarget(postHit, onHitAilment.turns)
-                : postHit;
+        const chanceAdd =
+          onHitAilment?.type && isSkill && pickedSkill?.id
+            ? getSkillAilmentChanceAddFromTalents({
+                talentMap,
+                casterHeroId: activeUnit.id,
+                skillId: pickedSkill.id,
+                ailmentType: onHitAilment.type,
+              })
+            : 0;
+        const chanceBase = typeof onHitAilment?.chance === 'number' ? onHitAilment.chance : null;
+        const affixHit = typeof activeUnit?.affixCcHitAdd === 'number' ? activeUnit.affixCcHitAdd : 0;
+        const affixRes = typeof postHit?.affixAilResistAdd === 'number' ? postHit.affixAilResistAdd : 0;
+        const chance = chanceBase == null ? null : Math.max(0, Math.min(1, chanceBase + chanceAdd + affixHit - affixRes));
+        const rollOk = !onHitAilment || chance == null ? true : Math.random() < chance;
+        let postAilment =
+          !rollOk
+            ? postHit
+            : onHitAilment?.type === 'poison'
+              ? applyPoisonOnTarget(postHit, onHitAilment.turns)
+              : onHitAilment?.type === 'burn'
+                ? applyBurnOnTarget(postHit, onHitAilment.stacks)
+                : onHitAilment?.type === 'darkness'
+                  ? applyDarknessOnTarget(postHit, onHitAilment.turns)
+                  : onHitAilment?.type === 'stun'
+                    ? applyStunOnTarget(postHit, onHitAilment.turns)
+                    : postHit;
+        if (rollOk && activeUnit?.id === 'butiya_halloween' && hasDoubleDotFromSelfTalent(talentMap, 'butiya_halloween')) {
+          if (onHitAilment?.type === 'burn') postAilment = { ...postAilment, burnDmgMul: 2 };
+          if (onHitAilment?.type === 'poison') postAilment = { ...postAilment, poisonDmgMul: 2 };
+        }
         let merged = {
           ...postAilment,
           ...(applyDebuff && deb?.stat === 'def+mdef'
@@ -2584,6 +3658,9 @@ export default function App() {
           merged = { ...merged, spdDownTurns: spdTurns, spdDownMul: deb.mul };
           merged = { ...merged, av: rescaleAvForSpdChange(m.av, oldEff, getEffectiveSpd(merged)) };
         }
+        if (applyDebuff && pickedSkill?.effect?.ailment?.type === 'darkness') {
+          merged = applyDarknessOnTarget(merged, pickedSkill.effect.ailment.turns);
+        }
         return merged;
       }
       const sh = splashHits.find((s) => s.id === m.id);
@@ -2592,6 +3669,26 @@ export default function App() {
     });
 
     let heroesForEnd = heroes;
+
+    // 死亡標記：本次行動造成擊殺則觸發（波及怪物友軍）
+    {
+      const died = [];
+      const prevMain = monsters.find((m) => m.id === mId);
+      const nextMain = newM.find((m) => m.id === mId);
+      if (prevMain && nextMain && prevMain.curHp > 0 && nextMain.curHp <= 0 && prevMain.deathMark) died.push(prevMain);
+      for (const sh of splashHits) {
+        const p = monsters.find((m) => m.id === sh.id);
+        const n = newM.find((m) => m.id === sh.id);
+        if (p && n && p.curHp > 0 && n.curHp <= 0 && p.deathMark) died.push(p);
+      }
+      let mWork = newM;
+      for (const dm of died) {
+        const boom = triggerDeathMarkExplosion(dm, mWork);
+        mWork = boom.monstersNext;
+        if (boom.logLine) setLogs((prev) => [boom.logLine, ...prev].slice(0, 5));
+      }
+      newM = applyLavaCoreDeathBonusStrip(mWork);
+    }
 
     // 天賦：擊殺回 MP（僅計算本次行動造成的擊殺）
     const killMp = getOnKillMpFromTalents(talentMap, activeUnit.id);
@@ -2639,6 +3736,29 @@ export default function App() {
       }
     }
 
+    // 天賦：擊殺 + 加速（僅計算本次行動造成的擊殺）
+    const killSpd = activeUnit?.isHero ? getOnKillSpdBuffFromTalents(talentMap, activeUnit.id) : null;
+    if (killSpd && activeUnit?.isHero) {
+      const killedIds = new Set();
+      const prevMain = monsters.find((m) => m.id === mId);
+      const nextMain = newM.find((m) => m.id === mId);
+      if (prevMain && nextMain && prevMain.curHp > 0 && nextMain.curHp <= 0) killedIds.add(mId);
+      for (const sh of splashHits) {
+        const p = monsters.find((m) => m.id === sh.id);
+        const n = newM.find((m) => m.id === sh.id);
+        if (p && n && p.curHp > 0 && n.curHp <= 0) killedIds.add(sh.id);
+      }
+      const kills = killedIds.size;
+      if (kills > 0) {
+        heroesForEnd = heroesForEnd.map((h) => {
+          if (h.id !== activeUnit.id) return h;
+          const nextTurns = Math.max(h.spdBuffTurns ?? 0, killSpd.turns);
+          const nextMul = Math.max(h.spdBuffMul ?? 1, killSpd.mul);
+          return { ...h, spdBuffTurns: nextTurns, spdBuffMul: nextMul };
+        });
+      }
+    }
+
     // 天賦：爆擊吸血（只吃本次行動造成的暴擊傷害）
     const lsMul = activeUnit?.isHero ? getCritLifestealMulFromTalents(talentMap, activeUnit.id) : 0;
     if (lsMul > 0 && activeUnit?.isHero && critDamageForLifesteal > 0) {
@@ -2652,14 +3772,14 @@ export default function App() {
     if (
       didCrit &&
       activeUnit?.isHero &&
-      activeUnit.id === 'h9' &&
-      canCritStealRandomBuffFromEnemyFromTalents(talentMap, 'h9')
+      activeUnit.id === 'jack' &&
+      canCritStealRandomBuffFromEnemyFromTalents(talentMap, 'jack')
     ) {
-      const res = stealRandomBuffFromMonsterToHero({ heroId: 'h9', monsterId: mId, monstersList: newM });
+      const res = stealRandomBuffFromMonsterToHero({ heroId: 'jack', monsterId: mId, monstersList: newM });
       if (res.ok) {
         heroesForEnd = res.heroesNext;
         newM = res.monstersNext;
-        setLogs([`怪盜風・掠光竊印：竊取敵方「${res.stolen}」增益`, ...logs].slice(0, 5));
+        setLogs([`掠光竊印：竊取敵方「${res.stolen}」增益`, ...logs].slice(0, 5));
       }
     }
 
@@ -2668,9 +3788,20 @@ export default function App() {
         h.id === activeUnit.id ? applySelfOnHitToHero(h, selfOnHit) : h
       );
     }
+    // 合體技／技能：我方全體看破特攻（1 回合）
+    if (allyBuff?.type === 'dmgVsWeaknessSeen' && typeof allyBuff.mul === 'number' && allyBuff.mul > 1) {
+      const turns = Math.max(1, Math.floor(Number(allyBuff.turns) || 1));
+      const mul = allyBuff.mul;
+      heroesForEnd = heroesForEnd.map((h) => {
+        if (!h?.isHero || (h.curHp ?? 0) <= 0) return h;
+        const nextTurns = Math.max(h.weaknessSeenDmgTurns ?? 0, turns);
+        const nextMul = Math.max(h.weaknessSeenDmgMul ?? 1, mul);
+        return { ...h, weaknessSeenDmgTurns: nextTurns, weaknessSeenDmgMul: nextMul };
+      });
+    }
     setHeroes(heroesForEnd);
-    const coreWasAlive = monsters.some((m) => monsterTemplateId(m.id) === 'c4-lava-core' && m.curHp > 0);
-    const coreNowDead = !newM.some((m) => monsterTemplateId(m.id) === 'c4-lava-core' && m.curHp > 0);
+    const coreWasAlive = monsters.some((m) => isLavaCoreTemplateId(monsterTemplateId(m.id)) && m.curHp > 0);
+    const coreNowDead = !newM.some((m) => isLavaCoreTemplateId(monsterTemplateId(m.id)) && m.curHp > 0);
     const strippedM = applyLavaCoreDeathBonusStrip(newM);
     const shellCracked = coreWasAlive && coreNowDead;
     setMonsters(strippedM);
@@ -2696,8 +3827,8 @@ export default function App() {
     const mainHitLine = isSkill
       ? applyDebuff
         ? `${activeUnit.name} 施放${skillLabel}：${target.name} ${debuffLine}${applyDebuffDamage ? `，並造成 ${damage} 傷害${critMark}` : ''}`
-        : `${activeUnit.name} 施放${skillLabel}對 ${target.name} 造成 ${damage} 傷害${critMark}！${splashLine}${selfOnHitLine}`
-      : `${activeUnit.name} 對 ${target.name} 造成 ${damage} 傷害${critMark}！`;
+        : `${activeUnit.name} 施放${skillLabel}對 ${target.name} 造成 ${damage} 傷害${critMark}${multiHitLine}！${splashLine}${selfOnHitLine}`
+      : `${activeUnit.name} 對 ${target.name} 造成 ${damage} 傷害${critMark}${multiHitLine}！`;
     setLogs(
       [
         ...(shellCracked ? ['熔岩核心的加護潰散：熔岩巨人的額外體魄被剝離！'] : []),
@@ -2708,9 +3839,32 @@ export default function App() {
 
     const isAttack = targetMode === 'attack';
     const baseAtkMpGain = !isSkill && isAttack ? 10 : 0;
-    const butiyaBonus = activeUnit?.id === 'h4' && (target?.spdDownTurns ?? 0) > 0 ? 2 : 1;
+    const butiyaBonus = activeUnit?.id === 'butiya' && (target?.spdDownTurns ?? 0) > 0 ? 2 : 1;
     const atkMpGain = Math.floor(baseAtkMpGain * butiyaBonus);
-    const newH = endHeroAction(heroesForEnd, { mpCost: isSkill ? mpCost : 0, mpGain: atkMpGain });
+    let newH = endHeroAction(heroesForEnd, { mpCost: isSkill ? mpCost : 0, mpGain: atkMpGain });
+    if (isSkill && activeUnit?.id && pickedSkill?.id) {
+      setSkillMasteryMap((prev) => incSkillUses(prev, activeUnit.id, pickedSkill.id, 1));
+      setDailyQ((s) => {
+        const qid = 'skill_casts';
+        if (!s?.picked?.includes(qid)) return s;
+        const def = DAILY_QUEST_DEFS[qid];
+        const now = loadDailyQuestsState();
+        if (now.date !== s.date) return now;
+        const p = Math.max(0, Number(s.prog?.[qid] ?? 0));
+        return { ...s, prog: { ...(s.prog ?? {}), [qid]: Math.min(def.target, p + 1) } };
+      });
+    }
+
+    // 合體技代價：夥伴也進入硬直（行動條推到更後面）
+    if (isSkill && pickedSkill?.combo?.partnerId) {
+      const pid = pickedSkill.combo.partnerId;
+      const partner = newH.find((h) => h.id === pid);
+      if (partner && (partner.curHp ?? 0) > 0) {
+        const spd = getEffectiveSpd(partner);
+        newH = newH.map((h) => (h.id === pid ? { ...h, av: (h.av ?? 0) + 10000 / spd } : h));
+        setHeroes(newH);
+      }
+    }
 
     await new Promise((r) => setTimeout(r, 600));
     if (strippedM.every((m) => m.curHp <= 0)) grantVictory(strippedM);
@@ -2744,7 +3898,7 @@ export default function App() {
         if ((activeUnit.battlePassive ?? '') === 'lavaCore') {
           unlockAudio();
           SFX.skill();
-          const giant = monsters.find((m) => monsterTemplateId(m.id) === 'boss-lava-giant' && m.curHp > 0);
+          const giant = monsters.find((m) => isLavaGiantTemplateId(monsterTemplateId(m.id)) && m.curHp > 0);
           let newM = monsters;
           if (giant) {
             const heal = Math.max(1, Math.floor(giant.hp * 0.055));
@@ -2762,7 +3916,7 @@ export default function App() {
           );
           setMonsters(newM2);
           if (heroes.every((h) => h.curHp <= 0)) setScene('defeat');
-          else advanceTurn(heroes, newM2, null);
+          else advanceTurn(heroes, newM2, null, activeUnit.id);
           return;
         }
 
@@ -2771,9 +3925,12 @@ export default function App() {
 
         const applyAilmentOnHero = (u, ail) => {
           if (!u || u.curHp <= 0 || !ail) return u;
+          const ok = typeof ail.chance === 'number' ? Math.random() < Math.max(0, Math.min(1, ail.chance)) : true;
+          if (!ok) return u;
           if (ail.type === 'poison') return applyPoisonOnTarget(u, ail.turns);
           if (ail.type === 'burn') return applyBurnOnTarget(u, ail.stacks);
           if (ail.type === 'darkness') return applyDarknessOnTarget(u, ail.turns);
+          if (ail.type === 'stun') return applyStunOnTarget(u, ail.turns);
           return u;
         };
 
@@ -2781,17 +3938,79 @@ export default function App() {
         const usable = skillSet.filter((s) => s && (activeUnit.curMp ?? 0) >= (s.mpCost ?? 0));
         const chooseSkill = () => {
           if (usable.length === 0) return null;
-          const all = usable.filter((s) => s?.effect?.type === 'damage' && s.effect.target === 'enemy-all');
+          const filtered = usable.filter((s) => {
+            if (s?.effect?.type === 'selfBuff') {
+              if (s.effect.stat === 'atk' && (activeUnit.atkBuffTurns ?? 0) > 0) return false;
+              if (s.effect.stat === 'def' && (activeUnit.defBuffTurns ?? 0) > 0) return false;
+            }
+            return true;
+          });
+          const pool = filtered.length > 0 ? filtered : usable;
+          const all = pool.filter((s) => s?.effect?.type === 'damage' && s.effect.target === 'enemy-all');
           if (all.length > 0 && Math.random() < 0.22) return all[Math.floor(Math.random() * all.length)];
-          return usable[Math.floor(Math.random() * usable.length)];
+          return pool[Math.floor(Math.random() * pool.length)];
         };
         const mSkill = chooseSkill();
         const useSkill = !!mSkill && Math.random() < 0.75;
         const effect = useSkill ? mSkill?.effect : null;
         const mOnHitAilment = useSkill && effect?.type === 'damage' ? (effect.ailment ?? null) : null;
+        const mDebuff = useSkill && effect?.type === 'damage' ? (effect.debuff ?? null) : null;
+        const applyDebuffOnHero = (u, deb) => {
+          if (!u || u.curHp <= 0 || !deb) return u;
+          const stat = deb.stat;
+          const mul = typeof deb.mul === 'number' ? deb.mul : 1;
+          const turns = Math.max(1, Math.floor(Number(deb.turns) || 1));
+          const ok = typeof deb.chance === 'number' ? Math.random() < Math.max(0, Math.min(1, deb.chance)) : true;
+          if (!ok) return u;
+          if (stat === 'atk') return { ...u, atkDownTurns: Math.max(u.atkDownTurns ?? 0, turns), atkDownMul: Math.min(u.atkDownMul ?? 1, mul) };
+          if (stat === 'def')
+            return { ...u, defDownTurns: Math.max(u.defDownTurns ?? 0, turns), defDownMul: Math.min(u.defDownMul ?? 1, mul) };
+          if (stat === 'spd') return { ...u, spdDownTurns: Math.max(u.spdDownTurns ?? 0, turns), spdDownMul: Math.min(u.spdDownMul ?? 1, mul) };
+          if (stat === 'def+mdef')
+            return {
+              ...u,
+              defDownTurns: Math.max(u.defDownTurns ?? 0, turns),
+              defDownMul: Math.min(u.defDownMul ?? 1, mul),
+              mdefDownTurns: Math.max(u.mdefDownTurns ?? 0, turns),
+              mdefDownMul: Math.min(u.mdefDownMul ?? 1, mul),
+            };
+          return u;
+        };
 
         unlockAudio();
 
+        if (useSkill && (effect?.type === 'selfBuff' || effect?.type === 'allyBuff')) {
+          const stat = effect.stat;
+          const mul = effect.mul ?? 1;
+          const turns = effect.turns ?? 2;
+          const nextMonstAv = activeUnit.av + 10000 / getEffectiveSpd(activeUnit);
+          const nextMonstMp = Math.max(0, (activeUnit.curMp ?? 0) - (mSkill.mpCost ?? 0));
+          let newM;
+          let logTarget = activeUnit.name;
+          if (effect.type === 'selfBuff') {
+            const patch = stat === 'atk' ? { atkBuffTurns: turns, atkBuffMul: mul } : { defBuffTurns: turns, defBuffMul: mul };
+            newM = monsters.map((m) =>
+              m.id === activeUnit.id ? { ...m, ...patch, av: nextMonstAv, curMp: nextMonstMp } : m
+            );
+          } else {
+            const allies = monsters.filter((m) => m.id !== activeUnit.id && m.curHp > 0);
+            const buffTarget = allies.length > 0 ? allies[Math.floor(Math.random() * allies.length)] : null;
+            logTarget = buffTarget?.name ?? activeUnit.name;
+            const patch = stat === 'atk' ? { atkBuffTurns: turns, atkBuffMul: mul } : { defBuffTurns: turns, defBuffMul: mul };
+            newM = monsters.map((m) => {
+              if (m.id === activeUnit.id) return { ...m, av: nextMonstAv, curMp: nextMonstMp };
+              if (buffTarget && m.id === buffTarget.id) return { ...m, ...patch };
+              return m;
+            });
+          }
+          setMonsters(newM);
+          const buffLabel = stat === 'atk' ? '攻擊' : '防禦';
+          setLogs([`${activeUnit.name} 施放「${mSkill.name}」：${logTarget} ${buffLabel}提升！`, ...logs].slice(0, 5));
+          advanceTurn(heroes, newM, null, activeUnit.id);
+          return;
+        }
+
+        let newH = heroes;
         if (useSkill && effect?.type === 'damage' && effect.target === 'enemy-all') {
           SFX.skill();
           const alive = heroes.filter((h) => h.curHp > 0);
@@ -2800,7 +4019,7 @@ export default function App() {
             return { id: h.id, dmg: r.damage, crit: r.crit };
           });
           const prevBarrier = Object.fromEntries(heroes.map((h) => [h.id, { turns: h.barrierTurns ?? 0, source: h.barrierSource ?? null }]));
-          let newH = heroes.map((h) => {
+          newH = heroes.map((h) => {
             const hh = hits.find((x) => x.id === h.id);
             if (!hh) return h;
             const aliveBefore = h.curHp > 0;
@@ -2814,9 +4033,62 @@ export default function App() {
               curMp: Math.min(MP_MAX, h.curMp + mpAdd),
               lastHitMpTurn: alreadyGained ? h.lastHitMpTurn : turnSeq,
             };
-            return applyAilmentOnHero(baseNext, mOnHitAilment);
+            return applyDebuffOnHero(applyAilmentOnHero(baseNext, mOnHitAilment), mDebuff);
           });
+          // h6 天賦：被異常怪物攻擊時回 MP（只看 h6 本人）
+          {
+            const def = getMpOnHitByAilmentedEnemyFromTalents(talentMap, 'butiya_halloween');
+            const attackerHasAil =
+              (activeUnit.burnTurns ?? 0) > 0 ||
+              (activeUnit.poisonTurns ?? 0) > 0 ||
+              (activeUnit.freezeTurns ?? 0) > 0 ||
+              (activeUnit.darknessTurns ?? 0) > 0 ||
+              (activeUnit.dazzleTurns ?? 0) > 0 ||
+              (activeUnit.stunTurns ?? 0) > 0;
+            if (def && attackerHasAil) {
+              const b = newH.find((h) => h.id === 'butiya_halloween');
+              if (b && b.curHp > 0) {
+                const used = (b.h6MpOnHitTurnSeq ?? -1) === turnSeq ? Math.max(0, b.h6MpOnHitUsed ?? 0) : 0;
+                const left = Math.max(0, def.perTurnCap - used);
+                if (left > 0) {
+                  newH = newH.map((h) =>
+                    h.id === 'butiya_halloween'
+                      ? {
+                          ...h,
+                          curMp: Math.min(MP_MAX, (h.curMp ?? 0) + def.mp),
+                          h6MpOnHitTurnSeq: turnSeq,
+                          h6MpOnHitUsed: used + 1,
+                        }
+                      : h
+                  );
+                }
+              }
+            }
+          }
+          {
+            const directHits = hits.filter((x) => (x.dmg ?? 0) > 0).length;
+            const res = applyBubuMpOnAllyDirectDamage(newH, directHits);
+            newH = res.heroesNext;
+          }
           for (const hh of hits) newH = tickBarrierOnHit(newH, hh.id);
+          // 虎吉被動：受到攻擊時低機率暈眩攻擊者（怪物）；全體攻擊時任一命中即可觸發一次
+          {
+            const anyTriggered = hits.some((hh) => {
+              const hitHero = newH.find((h) => h.id === hh.id);
+              const eff = hitHero?.passive?.effect;
+              const chance = eff?.type === 'stunOnBeingHit' ? Number(eff.chance) || 0 : 0;
+              const turns = eff?.type === 'stunOnBeingHit' ? Math.max(1, Math.floor(Number(eff.turns) || 1)) : 0;
+              if (!(chance > 0) || !(turns > 0)) return false;
+              if ((hitHero?.curHp ?? 0) <= 0) return false;
+              return Math.random() < Math.max(0, Math.min(1, chance));
+            });
+            if (anyTriggered && activeUnit?.curHp > 0) {
+              setMonsters((prev) =>
+                prev.map((m) => (m.id === activeUnit.id && m.curHp > 0 ? applyStunOnTarget(m, 1) : m))
+              );
+              setLogs((prev) => [`厚實肚肚：${activeUnit.name} 暈眩（1 回合）`, ...prev].slice(0, 5));
+            }
+          }
           for (const hh of hits) {
             const prev = prevBarrier[hh.id];
             const next = newH.find((h) => h.id === hh.id);
@@ -2840,7 +4112,7 @@ export default function App() {
           const prevTarget = heroes.find((h) => h.id === target.id);
           const prevBarrierTurns = prevTarget?.barrierTurns ?? 0;
           const prevBarrierSource = prevTarget?.barrierSource ?? null;
-          let newH = heroes.map((h) => {
+          newH = heroes.map((h) => {
             if (h.id !== target.id) return h;
             const aliveBefore = h.curHp > 0;
             const nextHp = Math.max(0, h.curHp - dmg);
@@ -2853,8 +4125,56 @@ export default function App() {
               curMp: Math.min(MP_MAX, h.curMp + mpAdd),
               lastHitMpTurn: alreadyGained ? h.lastHitMpTurn : turnSeq,
             };
-            return applyAilmentOnHero(baseNext, mOnHitAilment);
+            return applyDebuffOnHero(applyAilmentOnHero(baseNext, mOnHitAilment), mDebuff);
           });
+          // 虎吉被動：受到攻擊時低機率暈眩攻擊者（怪物）
+          {
+            const hitHero = newH.find((h) => h.id === target.id);
+            const eff = hitHero?.passive?.effect;
+            const chance = eff?.type === 'stunOnBeingHit' ? Number(eff.chance) || 0 : 0;
+            const turns = eff?.type === 'stunOnBeingHit' ? Math.max(1, Math.floor(Number(eff.turns) || 1)) : 0;
+            if (chance > 0 && turns > 0 && activeUnit?.curHp > 0 && Math.random() < Math.max(0, Math.min(1, chance))) {
+              setMonsters((prev) =>
+                prev.map((m) => (m.id === activeUnit.id && m.curHp > 0 ? applyStunOnTarget(m, turns) : m))
+              );
+              setLogs((prev) => [`厚實肚肚：${activeUnit.name} 暈眩（${turns} 回合）`, ...prev].slice(0, 5));
+            }
+          }
+          // h6 天賦：被異常怪物攻擊時回 MP（只看 h6 本人）
+          {
+            const def = getMpOnHitByAilmentedEnemyFromTalents(talentMap, 'butiya_halloween');
+            const attackerHasAil =
+              (activeUnit.burnTurns ?? 0) > 0 ||
+              (activeUnit.poisonTurns ?? 0) > 0 ||
+              (activeUnit.freezeTurns ?? 0) > 0 ||
+              (activeUnit.darknessTurns ?? 0) > 0 ||
+              (activeUnit.dazzleTurns ?? 0) > 0 ||
+              (activeUnit.stunTurns ?? 0) > 0;
+            if (def && attackerHasAil && target?.id === 'butiya_halloween') {
+              const b = newH.find((h) => h.id === 'butiya_halloween');
+              if (b && b.curHp > 0) {
+                const used = (b.h6MpOnHitTurnSeq ?? -1) === turnSeq ? Math.max(0, b.h6MpOnHitUsed ?? 0) : 0;
+                const left = Math.max(0, def.perTurnCap - used);
+                if (left > 0) {
+                  newH = newH.map((h) =>
+                    h.id === 'butiya_halloween'
+                      ? {
+                          ...h,
+                          curMp: Math.min(MP_MAX, (h.curMp ?? 0) + def.mp),
+                          h6MpOnHitTurnSeq: turnSeq,
+                          h6MpOnHitUsed: used + 1,
+                        }
+                      : h
+                  );
+                }
+              }
+            }
+          }
+          {
+            const directHits = (dmg ?? 0) > 0 ? 1 : 0;
+            const res = applyBubuMpOnAllyDirectDamage(newH, directHits);
+            newH = res.heroesNext;
+          }
           newH = tickBarrierOnHit(newH, target.id);
           // 天賦：守護盾護盾被擊破回 MP（回的是被護盾保護的角色）
           const nextTarget = newH.find((h) => h.id === target.id);
@@ -2886,7 +4206,7 @@ export default function App() {
         );
         setMonsters(newM);
         if (newH.every((h) => h.curHp <= 0)) setScene('defeat');
-        else advanceTurn(newH, newM, null);
+        else advanceTurn(newH, newM, null, activeUnit.id);
       };
       monsterAI();
     }
@@ -2914,10 +4234,13 @@ export default function App() {
   const statusUnit = getStatusUnit();
 
   const performAccountReset = () => {
-    if (resetConfirmInput.trim() !== 'reset') {
-      setResetConfirmError('請完整輸入小寫 reset 以確認');
+    // 允許大小寫與前後空白，避免手機/輸入法導致「看起來一樣但比對失敗」
+    const confirm = String(resetConfirmInput ?? '').trim().toLowerCase();
+    if (confirm !== 'reset') {
+      setResetConfirmError('請輸入 reset（可忽略大小寫與前後空白）以確認');
       return;
     }
+    setPartyNotice('重置中…');
     clearPartyStorage();
     clearHeroXpStorage();
     clearGoldStorage();
@@ -2932,20 +4255,38 @@ export default function App() {
     clearBossLootStorage();
     clearExpStageEntryStorage();
     clearGoldStageEntryStorage();
+    clearTalentStorage();
+    clearTalentRow4ProgressStorage();
+    clearDailyQuestsStorage();
+    clearGardenPlotsStorage();
+    clearFishCodexStorage();
+    clearMiningDailyStorage();
+    clearHuntingDailyStorage();
+    clearCampRecipeStorage();
+    clearSkillMasteryStorage();
+    clearLobbyBgStorage();
+    clearLobbyHeroStorage();
     setGold(0);
     setStarCrystals(0);
     setStarWishDiscountPulls(0);
     setStarWishLastMsg('');
-    setHeroEquipMap(loadHeroEquipMap());
+    setHeroEquipV2(loadHeroEquipMapV2());
     setEquipModalHeroId(null);
     setEquipInv(loadEquipInventory());
     setItemInv(loadItemInventory());
+    setGardenPlots(loadGardenPlots());
+    setFishCodex(loadFishCodex());
     setPartyIds(loadPartyIds());
+    setCampOwnedRecipeIds(loadCampRecipeOwnedIds());
     setAllHeroesUnlocked(loadAllHeroesUnlocked());
     setUnlockedHeroIds(loadUnlockedHeroIds());
     setCompletedStageIds(loadCompletedStageIds());
     setExpRunsLeft(getExpStageRunsLeft());
     setGoldRunsLeft(getGoldStageRunsLeft());
+    setTalentMap(loadTalentMap());
+    setTalentR4Prog(loadTalentRow4Progress());
+    setSkillMasteryMap(loadSkillMasteryMap());
+    setDailyQ(loadDailyQuestsState());
     setSelectedChapterId('ch-0');
     setSelectedStageId('stage-0');
     setStageNotice('');
@@ -2963,34 +4304,131 @@ export default function App() {
     setSettingsMenuOpen(false);
     setShowExitModal(false);
     setScene('lobby');
+    setLobbyBgId(loadLobbyBgId());
+    setLobbyHeroId(getInitialLobbyHeroId());
   };
 
-  const equipForHero = (heroId) => heroEquipMap[heroId] ?? defaultEquip();
-  const setEquipForHero = (heroId, nextEquip) => {
-    setHeroEquipMap((prev) => ({ ...prev, [heroId]: nextEquip }));
+  const getInstanceByEid = (eid) => (equipInstances ?? []).find((x) => x.eid === eid) ?? null;
+
+  const equipForHeroV2 = (heroId) => heroEquipV2?.[heroId] ?? { weaponEid: null, offhandEid: null, armorEid: null };
+
+  const equipItemIdsForHero = (heroId) => {
+    const e = equipForHeroV2(heroId);
+    const w = getInstanceByEid(e.weaponEid);
+    const o = getInstanceByEid(e.offhandEid);
+    const a = getInstanceByEid(e.armorEid);
+    return { weaponId: w?.itemId ?? null, offhandId: o?.itemId ?? null, armorId: a?.itemId ?? null };
   };
 
-  const countEquippedItem = (itemId) => {
-    if (!itemId) return 0;
-    let c = 0;
-    for (const heroId of Object.keys(heroEquipMap ?? {})) {
-      const e = heroEquipMap[heroId];
+  const equippedEidOwner = useMemo(() => {
+    const map = {};
+    for (const hid of HEROES_BASE.map((h) => h.id)) {
+      const e = heroEquipV2?.[hid];
       if (!e) continue;
-      if (e.weaponId === itemId) c += 1;
-      if (e.offhandId === itemId) c += 1;
-      if (e.armorId === itemId) c += 1;
+      if (e.weaponEid) map[e.weaponEid] = hid;
+      if (e.offhandEid) map[e.offhandEid] = hid;
+      if (e.armorEid) map[e.armorEid] = hid;
     }
-    return c;
+    return map;
+  }, [heroEquipV2]);
+
+  const formatAffixZh = (a) => {
+    const stat = a?.stat;
+    const v = Math.floor(Number(a?.value) || 0);
+    const nameMap = {
+      hp: 'HP',
+      atk: '攻擊',
+      matk: '魔力',
+      def: '物防',
+      mdef: '魔抗',
+      spd: '速度',
+      critRateAdd: '爆擊率',
+      critDmgMul: '爆擊傷害',
+      skillDmgMul: '技能傷害',
+      incomingDmgMul: '減傷',
+      ccHitAdd: '控制命中',
+      ailResistAdd: '異常抗性',
+    };
+    const nm = nameMap[stat] ?? String(stat || '');
+    if (stat === 'incomingDmgMul' || stat === 'ccHitAdd' || stat === 'ailResistAdd') return `${nm}+${v}%`;
+    if (stat === 'critRateAdd' || stat === 'critDmgMul' || stat === 'skillDmgMul') return `${nm}+${v}%`;
+    return `${nm}+${v}`;
   };
 
-  const canEquipItem = (itemId, heroId, slotKey) => {
-    if (!itemId) return true;
-    const owned = getEquipInvCount(equipInv, itemId);
-    const equippedTotal = countEquippedItem(itemId);
-    const cur = equipForHero(heroId);
-    const curId = slotKey === 'weaponId' ? cur.weaponId : slotKey === 'offhandId' ? cur.offhandId : cur.armorId;
-    const equippedAdjusted = equippedTotal - (curId === itemId ? 1 : 0);
-    return owned > equippedAdjusted;
+  const renderFacilityNpcHeader = (kind) => {
+    const map = {
+      forge: {
+        name: '赫里斯',
+        title: '鍛造所管理人',
+        badge: 'Forge',
+        cls: 'from-amber-500/15 via-slate-950/60 to-orange-900/20',
+        lines: ['「想要更好的詞條？給我金幣，我給你火花。」', '「想指定一條？價錢更高，但成功率由我保。」', '（點一下我，換一句）'],
+      },
+      training: {
+        name: '洛薇',
+        title: '訓練場教官',
+        badge: 'Train',
+        cls: 'from-emerald-500/12 via-slate-950/60 to-sky-900/20',
+        lines: ['「熟練度是用汗換的。你出錢，我出方法。」', '「今天練慢一點，明天你就會更痛。」', '（點一下我，換一句）'],
+      },
+      camp: {
+        name: '米菈',
+        title: '餐酒館掌櫃',
+        badge: 'Tavern',
+        cls: 'from-violet-500/12 via-slate-950/60 to-fuchsia-900/20',
+        lines: ['「先喝一杯再上路吧。料理的力量，會在戰鬥一開始替你守住節奏。」', '「想打得更穩？先把胃跟心都暖起來。」', '（點一下我，換一句）'],
+      },
+      garden: {
+        name: '奧凜',
+        title: '休憩園管園人',
+        badge: 'Garden',
+        cls: 'from-lime-500/10 via-slate-950/60 to-emerald-900/18',
+        lines: [
+          '「這裡不趕路，只趕得走疲憊。想種子發芽、想浮標沉一下，都隨你。」',
+          '「釣上來的寧靜、採下來的鮮味，以後都會回進你們的鍋邊與戰邊。」',
+          '（點一下我，換一句）',
+        ],
+      },
+    };
+    const d = map[kind] ?? map.camp;
+    const k = kind === 'forge' || kind === 'training' || kind === 'camp' || kind === 'garden' ? kind : 'camp';
+    const idx0 = Math.max(0, Math.floor(Number(facilityNpcTalkIdx?.[k] ?? 0)));
+    const lines = Array.isArray(d.lines) && d.lines.length ? d.lines : ['……'];
+    const idx = idx0 % lines.length;
+    return (
+      <div className="mt-3 grid grid-cols-[80px,1fr] gap-3 items-stretch">
+        <div className={`rounded-2xl border border-white/10 bg-gradient-to-br ${d.cls} p-2 flex items-center justify-center`}>
+          <div className="h-14 w-14 rounded-2xl border border-white/15 bg-black/20 flex items-center justify-center">
+            <span className="text-[11px] font-black text-slate-200 tracking-wide">{d.badge}</span>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setFacilityNpcTalkIdx((s) => ({ ...(s ?? {}), [k]: (Number(s?.[k] ?? 0) + 1) % Math.max(1, lines.length) }))}
+          className="text-left rounded-2xl border border-white/10 bg-black/35 p-3 hover:bg-black/45 active:scale-[0.995] transition-all"
+          title="點一下輪播對話"
+        >
+          <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">Dialogue</p>
+          <p className="text-[11px] font-black text-slate-200 mt-2 leading-tight">
+            {d.name} <span className="text-slate-500 font-bold">· {d.title}</span>
+          </p>
+          <p className="text-[11px] font-bold text-slate-200/90 leading-relaxed mt-1 whitespace-pre-wrap">{lines[idx]}</p>
+          <p className="text-[9px] font-black text-slate-600 mt-2 tabular-nums">
+            {idx + 1}/{lines.length}
+          </p>
+        </button>
+      </div>
+    );
+  };
+
+  const setEquipForHeroV2 = (heroId, patch) => {
+    setHeroEquipV2((prev) => ({ ...(prev ?? {}), [heroId]: { ...(prev?.[heroId] ?? { weaponEid: null, offhandEid: null, armorEid: null }), ...patch } }));
+  };
+
+  const canEquipEid = (eid, heroId) => {
+    if (!eid) return true;
+    const owner = equippedEidOwner?.[eid] ?? null;
+    return !owner || owner === heroId;
   };
 
   const buyEquip = (itemId) => {
@@ -3000,33 +4438,37 @@ export default function App() {
     }
     const it = getEquipItem(itemId);
     if (!it) return;
+    if ((equipInstances?.length ?? 0) >= EQUIP_INSTANCE_CAP) {
+      setShopDialog(`「你的裝備背包已滿（上限 ${EQUIP_INSTANCE_CAP}）。先去賣掉一些再來買吧。」`);
+      return;
+    }
     if (gold < (it.price ?? 0)) {
       setShopDialog(`「金幣不夠喔。${it.name} 需要 ${it.price} 金。」`);
       return;
     }
     setGold((g) => g - it.price);
-    setEquipInv((inv) => incEquipInv(inv, it.id, 1));
+    setEquipInstances((list) => [...(Array.isArray(list) ? list : []), { eid: `eq_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`, itemId: it.id, affixes: [], salt: 0, locked: false }]);
     setShopDialog(`「成交！你買下了 ${it.name}。」`);
   };
 
-  const sellEquip = (itemId) => {
+  const sellEquip = (eid) => {
     if (getShopPrismCount() < 2) {
       setShopDialog('「裝備買賣也要等你湊齊兩顆淨化稜晶再說。」');
       return;
     }
-    const it = getEquipItem(itemId);
+    const inst = getInstanceByEid(eid);
+    const it = getEquipItem(inst?.itemId);
     if (!it) return;
-    const owned = getEquipInvCount(equipInv, itemId);
-    if (owned <= 0) return;
-    const equipped = countEquippedItem(itemId);
-    if (owned - 1 < equipped) {
-      setShopDialog(`「你身上還有人正在裝備 ${it.name}，先卸下再賣吧。」`);
+    const owner = equippedEidOwner?.[eid] ?? null;
+    if (owner) {
+      const nm = HEROES_BASE.find((h) => h.id === owner)?.name ?? owner;
+      setShopDialog(`「這件 ${it.name} 目前正由 ${nm} 裝備中，先卸下再賣吧。」`);
       return;
     }
     const gain = getEquipSellPrice(it);
     setGold((g) => g + gain);
-    setEquipInv((inv) => incEquipInv(inv, it.id, -1));
-    setShopDialog(`「我收下了。${it.name} 賣出 +${gain} 金。」`);
+    setEquipInstances((list) => (Array.isArray(list) ? list.filter((x) => x.eid !== eid) : []));
+    setShopDialog(`「我收下了。${it.name}（#${String(eid).slice(-4)}）賣出 +${gain} 金。」`);
   };
 
   const buyItem = (itemId) => {
@@ -3098,6 +4540,10 @@ export default function App() {
       BGM.playLoop(isBossStageId(selectedStageId) ? 'boss' : 'battle');
       return;
     }
+    if (scene === 'shop') {
+      BGM.playLoop('shop');
+      return;
+    }
     if (scene === 'lobby' && lobbyPanelModal === 'recruit') {
       BGM.playLoop('gacha');
       return;
@@ -3106,6 +4552,26 @@ export default function App() {
       BGM.playLoop('menu');
     }
   }, [scene, selectedStageId, lobbyPanelModal, musicEnabled]);
+
+  // Mobile browsers often block autoplay; start BGM after first user gesture.
+  useEffect(() => {
+    if (!musicEnabled) return;
+    const onFirstGesture = async () => {
+      await unlockAudio();
+      if (scene === 'victory') BGM.playOneShot('victory');
+      else if (scene === 'defeat') BGM.playOneShot('defeat');
+      else if (scene === 'battle') BGM.playLoop(isBossStageId(selectedStageId) ? 'boss' : 'battle');
+      else if (scene === 'shop') BGM.playLoop('shop');
+      else if (scene === 'lobby' && lobbyPanelModal === 'recruit') BGM.playLoop('gacha');
+      else if (scene === 'lobby' || scene === 'story') BGM.playLoop('menu');
+    };
+    window.addEventListener('pointerdown', onFirstGesture, { once: true });
+    window.addEventListener('touchstart', onFirstGesture, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', onFirstGesture);
+      window.removeEventListener('touchstart', onFirstGesture);
+    };
+  }, [musicEnabled, scene, selectedStageId, lobbyPanelModal]);
 
   return (
     <div className="flex flex-col h-screen bg-slate-950 text-slate-100 font-sans overflow-hidden">
@@ -3117,7 +4583,7 @@ export default function App() {
               ? 'Main Hall'
               : scene === 'party'
                 ? 'Squad'
-                : scene === 'stage'
+                : scene === 'stage' || scene === 'main-story' || scene === 'chapter' || scene === 'exp-stage' || scene === 'gold-stage'
                   ? 'Adventure'
                   : scene === 'use-item'
                     ? 'Items'
@@ -3278,6 +4744,24 @@ export default function App() {
                       />
                     </div>
                   </div>
+                  {scene === 'lobby' ? (
+                    <>
+                      <div className="h-px bg-white/10" />
+                      <div className="px-3 py-2">
+                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">大廳</p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSettingsMenuOpen(false);
+                            setLobbyPanelModal('lobbyBg');
+                          }}
+                          className="mt-2 w-full rounded-lg border border-white/10 bg-slate-800/60 px-2.5 py-2 text-left text-[11px] font-bold text-slate-200 hover:bg-slate-800 transition-colors"
+                        >
+                          更換大廳背景…
+                        </button>
+                      </div>
+                    </>
+                  ) : null}
                   <div className="h-px bg-white/10" />
                   <div className="px-3 py-2">
                     <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">兌換碼</p>
@@ -3365,6 +4849,16 @@ export default function App() {
 
             <div className="px-5 py-4 overflow-y-auto no-scrollbar space-y-3">
               <div className="rounded-2xl border border-white/10 bg-black/30 p-3">
+                <p className="text-[10px] font-black text-slate-200">商店解鎖（依淨化稜晶數量）</p>
+                <ul className="mt-1 space-y-1 text-[11px] font-bold text-slate-300 leading-snug">
+                  <li>0 顆：治療藥水</li>
+                  <li>1 顆：魔力藥水、下級修煉手冊</li>
+                  <li>2 顆：裝備買賣、下級修煉手冊+、萬靈藥</li>
+                  <li>3 顆：進階裝備、中級修煉手冊（Lv.30 以下升 1 級）、治癒粉塵（全體補血）、中級治療藥水</li>
+                  <li>4 顆：中級魔力藥水、中級修煉手冊+（Lv.40 以下升 1 級）</li>
+                </ul>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-black/30 p-3">
                 <p className="text-[10px] font-black text-slate-200">屬性剋制</p>
                 <ul className="mt-1 space-y-1 text-[11px] font-bold text-slate-300 leading-snug">
                   <li>火 → 風：傷害 ×1.2；反過來 ×0.8</li>
@@ -3407,6 +4901,26 @@ export default function App() {
                 <p className="text-[10px] font-black text-slate-200">天賦（3×3）</p>
                 <p className="mt-1 text-[11px] font-bold text-slate-300 leading-snug">每列三選一，可隨時切換；第 3 列是角色專屬效果。</p>
               </div>
+              <div className="rounded-2xl border border-white/10 bg-black/30 p-3">
+                <p className="text-[10px] font-black text-slate-200">技能熟練度</p>
+                <ul className="mt-1 space-y-1 text-[11px] font-bold text-slate-300 leading-snug">
+                  <li>戰鬥中成功施放技能會累積使用次數；每 10 次升 1 階（熟練度 Lv.）。</li>
+                  <li>階位上限 Lv.10：施放約 100 次可滿階，之後次數仍會累計但階位不再升；每階約 +1% 技能傷害／治療（階位部分最高約 +10%）。</li>
+                  <li>達 Lv.6 可選「威力」或「省魔」分支（分別影響倍率或 MP 消耗）。</li>
+                </ul>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-black/30 p-3">
+                <p className="text-[10px] font-black text-slate-200">裝備詞條（鍛造所）</p>
+                <p className="mt-1 text-[11px] font-bold text-slate-300 leading-snug">
+                  「爆擊率+10%」代表額外 +10% 暴擊率（百分點，與基礎暴擊率相加；裝備來源合計封頂 +50%）。「爆擊傷害+10%」表示暴擊時的傷害倍率再提高約 10%（乘算）。減傷、控制命中、異常抗性的 +N% 亦為百分點。
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-black/30 p-3">
+                <p className="text-[10px] font-black text-slate-200">每日任務</p>
+                <p className="mt-1 text-[11px] font-bold text-slate-300 leading-snug">
+                  每天從下列類型中隨機抽出 3 項：施放技能、更換裝備、通關經驗或金錢關卡、羈絆點、鍛造所重抽詞條、訓練場買熟練包、餐酒館點餐。完成可領星曉晶石；全清有加成（面板內可見目標次數）。
+                </p>
+              </div>
             </div>
 
             <div className="px-5 pb-5 pt-3 border-t border-white/10 bg-slate-900/95 backdrop-blur shrink-0 flex justify-end">
@@ -3424,8 +4938,25 @@ export default function App() {
 
       <div className="flex-1 flex flex-col relative overflow-hidden">
         {scene === 'lobby' && (
-          <div className="flex-1 flex flex-col min-h-0 bg-[radial-gradient(circle_at_center,_#1e293b_0%,_#020617_100%)]">
-            <div className="shrink-0 px-3 pt-3 pb-2 space-y-2">
+          <div className="flex-1 flex flex-col min-h-0 relative">
+            <div className="absolute inset-0 z-0 overflow-hidden" aria-hidden>
+              <div className="absolute inset-0" style={{ background: lobbyBgDef.fallback }} />
+              <img
+                key={lobbyBgDef.id}
+                src={lobbyBgDef.image}
+                alt=""
+                decoding="async"
+                draggable={false}
+                className={`absolute inset-0 h-full w-full min-h-full min-w-full object-cover object-[center_30%] max-sm:scale-[1.03] max-sm:origin-[center_30%] sm:scale-100 sm:object-center transition-opacity duration-500 ${
+                  lobbyBgImgVisible ? 'opacity-100' : 'opacity-0'
+                }`}
+                onLoad={() => setLobbyBgImgVisible(true)}
+                onError={() => setLobbyBgImgVisible(false)}
+              />
+              <div className="absolute inset-0 pointer-events-none bg-gradient-to-b from-slate-950/55 via-slate-950/20 to-slate-950/88 max-sm:from-slate-950/40 max-sm:via-slate-950/12 max-sm:to-slate-950/60" />
+            </div>
+            <div className="relative z-10 flex-1 flex flex-col min-h-0">
+            <div className="shrink-0 px-2 sm:px-3 pt-2 sm:pt-3 pb-1.5 sm:pb-2 space-y-2">
               <button
                 type="button"
                 onClick={goToMainQuestTarget}
@@ -3457,68 +4988,82 @@ export default function App() {
             </div>
 
             <div className="flex-1 flex min-h-0">
-              <div className="flex-1 flex flex-col items-center justify-center px-3 pb-4 min-w-0">
-                <h2 className="text-[10px] font-black text-slate-600 uppercase tracking-[0.35em] mb-3">Aethelgard</h2>
-                <div
-                  key={lobbyBubble.tick}
-                  className="max-w-[min(18rem,100%)] mb-3 animate-in rounded-2xl border border-white/12 bg-slate-900/85 px-4 py-3 shadow-lg"
-                >
-                  <p className="text-[13px] font-bold text-slate-100 leading-relaxed text-center whitespace-pre-wrap">
-                    {lobbyBubble.text || '……'}
-                  </p>
-                  {!lobbyBubble.text ? (
-                    <p className="text-[9px] text-slate-500 mt-2 text-center">點擊角色或等候隨機問候</p>
-                  ) : null}
+              <div className="flex-1 flex flex-col min-h-0 min-w-0 px-0 sm:px-2 md:px-3 pb-0 min-h-0">
+                <div className="relative flex-1 min-h-0 w-full min-w-0">
+                  <div
+                    key={lobbyBubble.tick}
+                    className="absolute top-1 left-1 right-1 sm:top-2 z-20 mx-auto max-w-[min(20rem,100%)] animate-in rounded-2xl border border-white/12 bg-slate-900/85 px-3 py-2.5 sm:px-4 sm:py-3 shadow-lg"
+                  >
+                    <p className="text-[13px] font-bold text-slate-100 leading-relaxed text-center whitespace-pre-wrap">
+                      {lobbyBubble.text || '……'}
+                    </p>
+                    {!lobbyBubble.text ? (
+                      <p className="text-[9px] text-slate-500 mt-2 text-center">點擊立繪或等候隨機問候</p>
+                    ) : null}
+                  </div>
+                  {(() => {
+                    const lh = HEROES_BASE.find((h) => h.id === lobbyHeroId) ?? HEROES_BASE[0];
+                    return (
+                      <>
+                        <LobbyHeroStage
+                          key={lobbyHeroId}
+                          hero={lh}
+                          onActivate={() => showLobbyGreeting(lobbyHeroId)}
+                        />
+                        <div className="absolute inset-0 z-10 flex max-sm:items-end max-sm:pb-1.5 sm:items-center sm:pb-0 justify-between pointer-events-none px-0.5 sm:px-0.5">
+                          <button
+                            type="button"
+                            onClick={() => cycleLobbyHero(-1)}
+                            className="pointer-events-auto h-9 w-9 sm:h-11 sm:w-11 shrink-0 rounded-xl border border-white/15 bg-slate-950/50 backdrop-blur-sm flex items-center justify-center text-slate-200 hover:bg-slate-900/70 active:scale-95 shadow-md"
+                            aria-label="上一角色"
+                          >
+                            <ChevronLeft size={20} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => cycleLobbyHero(1)}
+                            className="pointer-events-auto h-9 w-9 sm:h-11 sm:w-11 shrink-0 rounded-xl border border-white/15 bg-slate-950/50 backdrop-blur-sm flex items-center justify-center text-slate-200 hover:bg-slate-900/70 active:scale-95 shadow-md"
+                            aria-label="下一角色"
+                          >
+                            <ChevronRight size={20} />
+                          </button>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
-                <div className="flex items-center gap-2 sm:gap-4">
-                  <button
-                    type="button"
-                    onClick={() => cycleLobbyHero(-1)}
-                    className="h-10 w-10 rounded-xl border border-white/10 bg-slate-900/60 flex items-center justify-center text-slate-300 hover:bg-slate-800 active:scale-95"
-                    aria-label="上一角色"
-                  >
-                    <ChevronLeft size={20} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => showLobbyGreeting(lobbyHeroId)}
-                    className="rounded-full ring-2 ring-violet-500/25 ring-offset-2 ring-offset-[#020617] active:scale-[0.98] transition-transform"
-                    aria-label="角色問候"
-                  >
-                    {(() => {
-                      const lh = HEROES_BASE.find((h) => h.id === lobbyHeroId) ?? HEROES_BASE[0];
-                      return <HeroAvatar src={lh.avatar} name={lh.name} accentClassName={lh.color} size="xl" />;
-                    })()}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => cycleLobbyHero(1)}
-                    className="h-10 w-10 rounded-xl border border-white/10 bg-slate-900/60 flex items-center justify-center text-slate-300 hover:bg-slate-800 active:scale-95"
-                    aria-label="下一角色"
-                  >
-                    <ChevronRight size={20} />
-                  </button>
-                </div>
-                <p className="text-[11px] font-black text-white mt-3">
-                  {(HEROES_BASE.find((h) => h.id === lobbyHeroId) ?? HEROES_BASE[0])?.name}
-                </p>
-                <p className="text-[9px] text-slate-600 mt-1 text-center px-2">左右切換已解鎖角色 · 底欄可進冒險／隊伍</p>
-                <p className="mt-5 text-xl font-black italic text-white/90 tracking-tight">遺落王權</p>
               </div>
 
-              <aside className="shrink-0 w-[4.75rem] sm:w-[6.25rem] border-l border-white/10 py-4 pr-2 sm:pr-3 flex flex-col gap-2 items-stretch">
+              <aside className="shrink-0 w-[4.75rem] sm:w-[6.25rem] border-l border-white/10 py-2 sm:py-4 pr-1.5 sm:pr-3 flex flex-col gap-1 sm:gap-2 items-stretch">
                 <button
                   type="button"
                   onClick={() => setLobbyPanelModal('daily')}
-                  className="flex flex-col items-center gap-1 rounded-xl border border-white/10 bg-slate-900/50 py-2.5 px-1 hover:bg-slate-800/70 active:scale-[0.98] transition-all"
+                  className="relative flex flex-col items-center gap-0.5 sm:gap-1 rounded-xl border border-white/10 bg-slate-900/50 py-2 sm:py-2.5 px-1 hover:bg-slate-800/70 active:scale-[0.98] transition-all"
                 >
+                  {(() => {
+                    const s = dailyQ ?? loadDailyQuestsState();
+                    const picked = Array.isArray(s?.picked) ? s.picked : [];
+                    const isDone = (qid) => {
+                      const def = DAILY_QUEST_DEFS[qid];
+                      const p = Number(s?.prog?.[qid] ?? 0);
+                      return p >= (def?.target ?? 0);
+                    };
+                    const anyClaimable = picked.some((qid) => isDone(qid) && !s?.claimed?.[qid]);
+                    const allClaimed = picked.length === 3 && picked.every((qid) => !!s?.claimed?.[qid]);
+                    const bonusClaimable = allClaimed && !s?.bonusClaimed;
+                    const show = anyClaimable || bonusClaimable;
+                    if (!show) return null;
+                    return (
+                      <span className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-rose-500 ring-2 ring-rose-200/40 animate-pulse" />
+                    );
+                  })()}
                   <Calendar size={20} className="text-sky-400" />
                   <span className="text-[8px] font-black text-slate-300 text-center leading-tight">每日任務</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setLobbyPanelModal('achievements')}
-                  className="flex flex-col items-center gap-1 rounded-xl border border-white/10 bg-slate-900/50 py-2.5 px-1 hover:bg-slate-800/70 active:scale-[0.98] transition-all"
+                  className="flex flex-col items-center gap-0.5 sm:gap-1 rounded-xl border border-white/10 bg-slate-900/50 py-2 sm:py-2.5 px-1 hover:bg-slate-800/70 active:scale-[0.98] transition-all"
                 >
                   <Trophy size={20} className="text-amber-400" />
                   <span className="text-[8px] font-black text-slate-300 text-center leading-tight">成就</span>
@@ -3527,20 +5072,56 @@ export default function App() {
                   type="button"
                   onClick={() => (isStarWishUnlocked ? setLobbyPanelModal('recruit') : setLobbyNotice('通關第五章尾聲後開放「星曉祈願」。'))}
                   className={
-                    'flex flex-col items-center gap-1 rounded-xl border border-white/10 bg-slate-900/50 py-2.5 px-1 hover:bg-slate-800/70 active:scale-[0.98] transition-all ' +
+                    'flex flex-col items-center gap-0.5 sm:gap-1 rounded-xl border border-white/10 bg-slate-900/50 py-2 sm:py-2.5 px-1 hover:bg-slate-800/70 active:scale-[0.98] transition-all ' +
                     (isStarWishUnlocked ? '' : 'opacity-45')
                   }
                   aria-label="星曉祈願"
                 >
                   <div
-                    className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-400/35 bg-gradient-to-b from-cyan-400/25 via-slate-900/90 to-violet-600/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_0_16px_rgba(34,211,238,0.18)]"
+                    className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-lg sm:rounded-xl border border-cyan-400/35 bg-gradient-to-b from-cyan-400/25 via-slate-900/90 to-violet-600/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_0_16px_rgba(34,211,238,0.18)]"
                     aria-hidden
                   >
-                    <Sparkles size={20} className="text-cyan-100 drop-shadow-[0_0_6px_rgba(167,243,208,0.45)]" strokeWidth={2.35} />
+                    <Sparkles className="h-[18px] w-[18px] sm:h-5 sm:w-5 text-cyan-100 drop-shadow-[0_0_6px_rgba(167,243,208,0.45)]" strokeWidth={2.35} />
                   </div>
                   <span className="text-[8px] font-black text-slate-300 text-center leading-tight">星曉祈願</span>
                 </button>
+
+                <div className="h-px bg-white/10 shrink-0" aria-hidden />
+
+                <button
+                  type="button"
+                  onClick={() => setLobbyPanelModal('forge')}
+                  className="flex flex-col items-center gap-0.5 sm:gap-1 rounded-xl border border-white/10 bg-slate-900/50 py-2 sm:py-2.5 px-1 hover:bg-slate-800/70 active:scale-[0.98] transition-all"
+                >
+                  <Hammer size={20} className="text-orange-300" />
+                  <span className="text-[8px] font-black text-slate-300 text-center leading-tight">鍛造所</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLobbyPanelModal('training')}
+                  className="flex flex-col items-center gap-0.5 sm:gap-1 rounded-xl border border-white/10 bg-slate-900/50 py-2 sm:py-2.5 px-1 hover:bg-slate-800/70 active:scale-[0.98] transition-all"
+                >
+                  <Dumbbell size={20} className="text-emerald-300" />
+                  <span className="text-[8px] font-black text-slate-300 text-center leading-tight">訓練場</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLobbyPanelModal('camp')}
+                  className="flex flex-col items-center gap-0.5 sm:gap-1 rounded-xl border border-white/10 bg-slate-900/50 py-2 sm:py-2.5 px-1 hover:bg-slate-800/70 active:scale-[0.98] transition-all"
+                >
+                  <Utensils size={20} className="text-amber-200" />
+                  <span className="text-[8px] font-black text-slate-300 text-center leading-tight">餐酒館</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLobbyPanelModal('garden')}
+                  className="flex flex-col items-center gap-0.5 sm:gap-1 rounded-xl border border-white/10 bg-slate-900/50 py-2 sm:py-2.5 px-1 hover:bg-slate-800/70 active:scale-[0.98] transition-all"
+                >
+                  <Sprout size={20} className="text-lime-300" />
+                  <span className="text-[8px] font-black text-slate-300 text-center leading-tight">休憩園</span>
+                </button>
               </aside>
+            </div>
             </div>
           </div>
         )}
@@ -3569,6 +5150,11 @@ export default function App() {
                       <p className="text-[9px] font-black text-amber-200/90 uppercase tracking-wide">隊長</p>
                       <p className="text-xs font-bold text-white truncate">
                         {HEROES_BASE.find((u) => u.id === partyIds[0])?.name ?? '—'}
+                        <span className="ml-2 text-[10px] font-black text-amber-200/85">
+                          {HEROES_BASE.find((u) => u.id === partyIds[0])?.captainPassive?.description
+                            ? `（${HEROES_BASE.find((u) => u.id === partyIds[0])?.captainPassive?.description}）`
+                            : ''}
+                        </span>
                       </p>
                     </div>
                   </div>
@@ -3580,7 +5166,15 @@ export default function App() {
             <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 py-3 space-y-2 pb-6">
               {(() => {
                 const partyXpMap = loadHeroXpMap();
-                return HEROES_BASE.map((hero) => {
+                const roster = HEROES_BASE.slice().sort((a, b) => {
+                  const desired = ['Puersz', 'xiongji', 'baize', 'butiya', 'bubu', 'huji', 'moying', 'jack', 'butiya_halloween', 'bubu_harvest'];
+                  const rank = new Map(desired.map((id, i) => [id, i]));
+                  const ar = rank.has(a.id) ? rank.get(a.id) : 9999;
+                  const br = rank.has(b.id) ? rank.get(b.id) : 9999;
+                  if (ar !== br) return ar - br;
+                  return HEROES_BASE.findIndex((x) => x.id === a.id) - HEROES_BASE.findIndex((x) => x.id === b.id);
+                });
+                return roster.map((hero) => {
                 const prog = partyXpMap[hero.id] ?? defaultProgress();
                 const on = partyIds.includes(hero.id);
                 const isCaptain = on && partyIds[0] === hero.id;
@@ -3636,7 +5230,26 @@ export default function App() {
                         onClick={() => togglePartyMember(hero.id)}
                         className="flex min-w-0 flex-1 flex-col items-start text-left transition-colors hover:bg-white/5 active:scale-[0.99] rounded-lg px-1.5 py-1"
                       >
-                        <p className={`text-xs font-black truncate w-full ${on ? 'text-blue-100' : 'text-slate-200'}`}>{hero.name}</p>
+                        <div className="flex items-center gap-2 w-full min-w-0">
+                          <p className={`text-xs font-black truncate min-w-0 flex-1 ${on ? 'text-blue-100' : 'text-slate-200'}`}>{hero.name}</p>
+                          {(() => {
+                            const t = hero.type;
+                            const map = {
+                              fire: { name: '火', cls: 'bg-red-500/15 text-red-200 border-red-500/25' },
+                              wind: { name: '風', cls: 'bg-emerald-500/15 text-emerald-200 border-emerald-500/25' },
+                              water: { name: '水', cls: 'bg-sky-500/15 text-sky-200 border-sky-500/25' },
+                              dark: { name: '暗', cls: 'bg-violet-500/15 text-violet-200 border-violet-500/25' },
+                              light: { name: '光', cls: 'bg-amber-500/15 text-amber-200 border-amber-500/25' },
+                            };
+                            const it = map[t];
+                            if (!it) return null;
+                            return (
+                              <span className={`shrink-0 px-1.5 py-0.5 rounded-md border text-[8px] font-black ${it.cls}`}>
+                                {it.name}
+                              </span>
+                            );
+                          })()}
+                        </div>
                         <p className="text-[8px] font-bold text-violet-300/90 mt-0.5">
                           Lv.{prog.level} · EXP {prog.xp}/{xpRequiredForNextLevel(prog.level)}
                         </p>
@@ -3669,31 +5282,15 @@ export default function App() {
                         設為隊長
                       </button>
                     ) : null}
-                    <div
-                      className={`flex shrink-0 flex-col items-center justify-center self-center rounded-full px-2 py-1 text-[9px] font-black ${
-                        isCaptain
-                          ? 'bg-amber-600 text-amber-950 ring-1 ring-amber-400/50'
-                          : on
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-slate-800 text-slate-500'
-                      }`}
-                    >
-                      {on ? (
-                        isCaptain ? (
-                          <span className="flex items-center gap-1">
-                            <Crown size={12} strokeWidth={2.5} className="shrink-0" />
-                            隊長
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-1">
-                            <Check size={12} strokeWidth={3} />
-                            上陣
-                          </span>
-                        )
-                      ) : (
-                        '候補'
-                      )}
-                    </div>
+                    {isCaptain ? (
+                      <div
+                        className="flex shrink-0 flex-col items-center justify-center gap-0.5 self-center rounded-lg border border-amber-500/45 bg-amber-600 px-2 py-1.5 text-[8px] font-black leading-tight text-amber-950 shadow-sm"
+                        title="隊長"
+                      >
+                        <Crown size={14} strokeWidth={2.25} className="text-amber-950" />
+                        隊長
+                      </div>
+                    ) : null}
                   </div>
                 );
               });
@@ -3713,8 +5310,8 @@ export default function App() {
                 <ChevronLeft size={14} />
                 返回大廳
               </button>
-              <h2 className="text-lg font-black italic text-white tracking-tight">章節選擇</h2>
-              <p className="text-[10px] text-slate-500 mt-0.5">選擇章節後進入關卡列表。</p>
+              <h2 className="text-lg font-black italic text-white tracking-tight">關卡選擇</h2>
+              <p className="text-[10px] text-slate-500 mt-0.5">經驗、金幣、或從主線任務進入第0章～第6章。</p>
             </div>
 
             <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 py-3 space-y-2 pb-6">
@@ -3739,7 +5336,9 @@ export default function App() {
                   <div className="min-w-0">
                     <p className="text-[11px] font-black italic text-white leading-tight">經驗關卡</p>
                     <p className="text-[9px] text-slate-500 mt-1">刷經驗用（5 種級別）</p>
-                    <p className="text-[9px] text-slate-400 mt-2 leading-snug">每日可刷 {EXP_STAGE_DAILY_LIMIT} 次（所有經驗關卡共用）</p>
+                    <p className="text-[9px] text-slate-400 mt-2 leading-snug">
+                      每日可刷 {EXP_STAGE_DAILY_LIMIT} 次（所有經驗關卡共用）；通關每次 +5 星曉晶石
+                    </p>
                   </div>
                   <div className="shrink-0 text-right">
                     <p className="text-[9px] font-black text-violet-300/90">剩餘次數</p>
@@ -3771,7 +5370,9 @@ export default function App() {
                   <div className="min-w-0">
                     <p className="text-[11px] font-black italic text-white leading-tight">金錢關卡</p>
                     <p className="text-[9px] text-slate-500 mt-1">刷金幣用（5 隻光史萊姆 × 5 種級別）</p>
-                    <p className="text-[9px] text-slate-400 mt-2 leading-snug">每日可刷 {GOLD_STAGE_DAILY_LIMIT} 次（所有金錢關卡共用）；通關每次 +10 星曉晶石</p>
+                    <p className="text-[9px] text-slate-400 mt-2 leading-snug">
+                      每日可刷 {GOLD_STAGE_DAILY_LIMIT} 次（所有金錢關卡共用）；通關每次 +5 星曉晶石
+                    </p>
                   </div>
                   <div className="shrink-0 text-right">
                     <p className="text-[9px] font-black text-amber-300/90">剩餘次數</p>
@@ -3784,6 +5385,47 @@ export default function App() {
 
               {stageNotice ? <p className="text-[10px] text-amber-400 mt-1 font-bold">{stageNotice}</p> : null}
 
+              <button
+                type="button"
+                onClick={() => {
+                  setStageNotice('');
+                  setScene('main-story');
+                }}
+                className="w-full text-left rounded-2xl border border-cyan-500/30 bg-cyan-950/20 p-4 transition-all hover:bg-cyan-950/30 active:scale-[0.99]"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-black italic text-white leading-tight">主線任務</p>
+                    <p className="text-[9px] text-slate-500 mt-1">第0章～第6章 · 劇情與戰鬥關卡</p>
+                    <p className="text-[9px] text-cyan-200/80 mt-2 leading-snug">章節數：{CHAPTERS.length}</p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-[9px] font-black text-cyan-300/90">進入</p>
+                    <p className="text-sm font-black text-cyan-100 tabular-nums">›</p>
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {scene === 'main-story' && (
+          <div className="flex-1 flex flex-col min-h-0 bg-[radial-gradient(circle_at_top,_#1e293b_0%,_#020617_70%)]">
+            <div className="shrink-0 px-4 pt-3 pb-2 border-b border-white/10">
+              <button
+                type="button"
+                onClick={() => setScene('stage')}
+                className="flex items-center gap-1 text-[10px] font-bold text-slate-400 hover:text-white mb-2"
+              >
+                <ChevronLeft size={14} />
+                返回關卡
+              </button>
+              <h2 className="text-lg font-black italic text-white tracking-tight">主線任務</h2>
+              <p className="text-[10px] text-slate-500 mt-0.5">第0章～第6章：選擇章節後進入關卡列表。</p>
+              {stageNotice ? <p className="text-[10px] text-amber-400 mt-2 font-bold">{stageNotice}</p> : null}
+            </div>
+
+            <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 py-3 space-y-2 pb-6">
               {CHAPTERS.map((ch) => {
                 const unlocked = isChapterUnlocked(ch.id);
                 const active = selectedChapterId === ch.id;
@@ -3834,11 +5476,11 @@ export default function App() {
             <div className="shrink-0 px-4 pt-3 pb-2 border-b border-white/10">
               <button
                 type="button"
-                onClick={() => setScene('stage')}
+                onClick={() => setScene('main-story')}
                 className="flex items-center gap-1 text-[10px] font-bold text-slate-400 hover:text-white mb-2"
               >
                 <ChevronLeft size={14} />
-                返回章節
+                返回主線
               </button>
               <h2 className="text-lg font-black italic text-white tracking-tight">
                 {CHAPTERS.find((c) => c.id === selectedChapterId)?.title ?? '章節'}
@@ -3932,7 +5574,9 @@ export default function App() {
                 返回關卡
               </button>
               <h2 className="text-lg font-black italic text-white tracking-tight">金錢關卡</h2>
-              <p className="text-[10px] text-slate-500 mt-0.5">選擇級別後出發（所有金錢關卡共用每日次數）。敵方為 5 隻光史萊姆。</p>
+              <p className="text-[10px] text-slate-500 mt-0.5">
+                選擇級別後出發（所有金錢關卡共用每日次數）。敵方為 5 隻光史萊姆。通關每次 +5 星曉晶石；已通關的級別可掃蕩略過戰鬥。
+              </p>
               <p className="text-[10px] text-amber-200/90 mt-2 font-bold">
                 今日剩餘：{goldRunsLeft}/{GOLD_STAGE_DAILY_LIMIT}
               </p>
@@ -3943,44 +5587,56 @@ export default function App() {
               {STAGES.filter((st) => st?.kind === 'gold').map((st) => {
                 const unlocked = isStageUnlocked(st.id);
                 const active = selectedStageId === st.id;
+                const cleared = isStageCompleted(st.id);
                 const xpSum = sumMonstersXpReward(st.monsters ?? []);
                 const goldSum = sumMonstersGoldReward(st.monsters ?? []);
                 return (
-                  <button
-                    key={st.id}
-                    type="button"
-                    onClick={() => {
-                      if (!unlocked) {
-                        setStageNotice('此關卡尚未解鎖。');
-                        return;
-                      }
-                      setStageNotice('');
-                      setSelectedStageId(st.id);
-                    }}
-                    className={`w-full text-left rounded-2xl border p-4 transition-all active:scale-[0.99] ${
-                      !unlocked
-                        ? 'border-white/10 bg-slate-900/30 opacity-60 cursor-not-allowed'
-                        : active
-                          ? 'border-amber-500/50 bg-amber-600/10 ring-1 ring-amber-500/20'
-                          : 'border-white/10 bg-slate-900/40 hover:bg-slate-900/55'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-[11px] font-black italic text-white leading-tight">{st.title}</p>
-                        <p className="text-[9px] text-slate-500 mt-1">{st.subtitle}</p>
-                        <p className="text-[9px] text-slate-400 mt-2 leading-snug">
-                          敵人：{(st.monsters ?? []).map((m) => m.name).join(' + ') || '—'}
-                        </p>
+                  <div key={st.id} className="flex gap-2 items-stretch">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!unlocked) {
+                          setStageNotice('此關卡尚未解鎖。');
+                          return;
+                        }
+                        setStageNotice('');
+                        setSelectedStageId(st.id);
+                      }}
+                      className={`min-w-0 flex-1 text-left rounded-2xl border p-4 transition-all active:scale-[0.99] ${
+                        !unlocked
+                          ? 'border-white/10 bg-slate-900/30 opacity-60 cursor-not-allowed'
+                          : active
+                            ? 'border-amber-500/50 bg-amber-600/10 ring-1 ring-amber-500/20'
+                            : 'border-white/10 bg-slate-900/40 hover:bg-slate-900/55'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-black italic text-white leading-tight">{st.title}</p>
+                          <p className="text-[9px] text-slate-500 mt-1">{st.subtitle}</p>
+                          <p className="text-[9px] text-slate-400 mt-2 leading-snug">
+                            敵人：{(st.monsters ?? []).map((m) => m.name).join(' + ') || '—'}
+                          </p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="text-[9px] font-black text-amber-300/90">金錢 合計</p>
+                          <p className="text-sm font-black text-amber-200 tabular-nums">{goldSum}</p>
+                          <p className="text-[9px] font-black text-violet-300/90 mt-2">EXP</p>
+                          <p className="text-sm font-black text-violet-200 tabular-nums">{xpSum}</p>
+                        </div>
                       </div>
-                      <div className="shrink-0 text-right">
-                        <p className="text-[9px] font-black text-amber-300/90">金錢 合計</p>
-                        <p className="text-sm font-black text-amber-200 tabular-nums">{goldSum}</p>
-                        <p className="text-[9px] font-black text-violet-300/90 mt-2">EXP</p>
-                        <p className="text-sm font-black text-violet-200 tabular-nums">{xpSum}</p>
-                      </div>
-                    </div>
-                  </button>
+                    </button>
+                    {unlocked && cleared ? (
+                      <button
+                        type="button"
+                        onClick={() => sweepClearedExpGoldStage(st.id)}
+                        title="掃蕩：略過戰鬥並結算（仍消耗今日次數）"
+                        className="shrink-0 w-[3.1rem] self-stretch rounded-2xl border border-emerald-500/40 bg-emerald-950/45 px-1 py-2 text-[9px] font-black leading-tight text-emerald-100 shadow-sm transition-all hover:bg-emerald-900/55 active:scale-95"
+                      >
+                        掃蕩
+                      </button>
+                    ) : null}
+                  </div>
                 );
               })}
 
@@ -4014,7 +5670,9 @@ export default function App() {
                 返回關卡
               </button>
               <h2 className="text-lg font-black italic text-white tracking-tight">經驗關卡</h2>
-              <p className="text-[10px] text-slate-500 mt-0.5">選擇級別後出發（所有經驗關卡共用每日次數）。</p>
+              <p className="text-[10px] text-slate-500 mt-0.5">
+                選擇級別後出發（所有經驗關卡共用每日次數）。通關每次 +5 星曉晶石；已通關的級別可掃蕩略過戰鬥。
+              </p>
               <p className="text-[10px] text-slate-400 mt-2 font-bold">
                 今日剩餘：{expRunsLeft}/{EXP_STAGE_DAILY_LIMIT}
               </p>
@@ -4025,44 +5683,56 @@ export default function App() {
               {STAGES.filter((st) => st?.kind === 'xp').map((st) => {
                 const unlocked = isStageUnlocked(st.id);
                 const active = selectedStageId === st.id;
+                const cleared = isStageCompleted(st.id);
                 const xpSum = sumMonstersXpReward(st.monsters ?? []);
                 const goldSum = sumMonstersGoldReward(st.monsters ?? []);
                 return (
-                  <button
-                    key={st.id}
-                    type="button"
-                    onClick={() => {
-                      if (!unlocked) {
-                        setStageNotice('此關卡尚未解鎖。');
-                        return;
-                      }
-                      setStageNotice('');
-                      setSelectedStageId(st.id);
-                    }}
-                    className={`w-full text-left rounded-2xl border p-4 transition-all active:scale-[0.99] ${
-                      !unlocked
-                        ? 'border-white/10 bg-slate-900/30 opacity-60 cursor-not-allowed'
-                        : active
-                        ? 'border-violet-500/50 bg-violet-600/10 ring-1 ring-violet-500/20'
-                        : 'border-white/10 bg-slate-900/40 hover:bg-slate-900/55'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-[11px] font-black italic text-white leading-tight">{st.title}</p>
-                        <p className="text-[9px] text-slate-500 mt-1">{st.subtitle}</p>
-                        <p className="text-[9px] text-slate-400 mt-2 leading-snug">
-                          敵人：{(st.monsters ?? []).map((m) => m.name).join(' + ') || '—'}
-                        </p>
+                  <div key={st.id} className="flex gap-2 items-stretch">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!unlocked) {
+                          setStageNotice('此關卡尚未解鎖。');
+                          return;
+                        }
+                        setStageNotice('');
+                        setSelectedStageId(st.id);
+                      }}
+                      className={`min-w-0 flex-1 text-left rounded-2xl border p-4 transition-all active:scale-[0.99] ${
+                        !unlocked
+                          ? 'border-white/10 bg-slate-900/30 opacity-60 cursor-not-allowed'
+                          : active
+                            ? 'border-violet-500/50 bg-violet-600/10 ring-1 ring-violet-500/20'
+                            : 'border-white/10 bg-slate-900/40 hover:bg-slate-900/55'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-black italic text-white leading-tight">{st.title}</p>
+                          <p className="text-[9px] text-slate-500 mt-1">{st.subtitle}</p>
+                          <p className="text-[9px] text-slate-400 mt-2 leading-snug">
+                            敵人：{(st.monsters ?? []).map((m) => m.name).join(' + ') || '—'}
+                          </p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="text-[9px] font-black text-violet-300/90">EXP 合計</p>
+                          <p className="text-sm font-black text-violet-200 tabular-nums">{xpSum}</p>
+                          <p className="text-[9px] font-black text-amber-300/90 mt-2">金錢</p>
+                          <p className="text-sm font-black text-amber-200 tabular-nums">{goldSum}</p>
+                        </div>
                       </div>
-                      <div className="shrink-0 text-right">
-                        <p className="text-[9px] font-black text-violet-300/90">EXP 合計</p>
-                        <p className="text-sm font-black text-violet-200 tabular-nums">{xpSum}</p>
-                        <p className="text-[9px] font-black text-amber-300/90 mt-2">金錢</p>
-                        <p className="text-sm font-black text-amber-200 tabular-nums">{goldSum}</p>
-                      </div>
-                    </div>
-                  </button>
+                    </button>
+                    {unlocked && cleared ? (
+                      <button
+                        type="button"
+                        onClick={() => sweepClearedExpGoldStage(st.id)}
+                        title="掃蕩：略過戰鬥並結算（仍消耗今日次數）"
+                        className="shrink-0 w-[3.1rem] self-stretch rounded-2xl border border-emerald-500/40 bg-emerald-950/45 px-1 py-2 text-[9px] font-black leading-tight text-emerald-100 shadow-sm transition-all hover:bg-emerald-900/55 active:scale-95"
+                      >
+                        掃蕩
+                      </button>
+                    ) : null}
+                  </div>
                 );
               })}
 
@@ -4095,90 +5765,238 @@ export default function App() {
                 <ChevronLeft size={14} />
                 返回大廳
               </button>
-              <h2 className="text-lg font-black italic text-white tracking-tight">使用道具</h2>
-              <p className="text-[10px] text-slate-500 mt-0.5">
-                僅顯示可在戰鬥外使用、且背包持有數大於 0 的道具；重要道具固定列於最上方。
+              <h2 className="text-lg font-black italic text-white tracking-tight">背包</h2>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBackpackTab('items')}
+                  className={`px-3 py-2 rounded-xl border text-[10px] font-black transition-colors ${
+                    backpackTab === 'items'
+                      ? 'border-blue-500/45 bg-blue-600/15 text-blue-100'
+                      : 'border-white/10 bg-slate-900/40 text-slate-300 hover:bg-slate-900/55'
+                  }`}
+                >
+                  道具
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBackpackTab('ingredients')}
+                  className={`px-3 py-2 rounded-xl border text-[10px] font-black transition-colors ${
+                    backpackTab === 'ingredients'
+                      ? 'border-emerald-500/45 bg-emerald-600/15 text-emerald-100'
+                      : 'border-white/10 bg-slate-900/40 text-slate-300 hover:bg-slate-900/55'
+                  }`}
+                >
+                  新鮮食材
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBackpackTab('forge')}
+                  className={`px-3 py-2 rounded-xl border text-[10px] font-black transition-colors ${
+                    backpackTab === 'forge'
+                      ? 'border-amber-500/45 bg-amber-600/15 text-amber-100'
+                      : 'border-white/10 bg-slate-900/40 text-slate-300 hover:bg-slate-900/55'
+                  }`}
+                >
+                  鍛造素材
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBackpackTab('equip')}
+                  className={`px-3 py-2 rounded-xl border text-[10px] font-black transition-colors ${
+                    backpackTab === 'equip'
+                      ? 'border-violet-500/45 bg-violet-600/15 text-violet-100'
+                      : 'border-white/10 bg-slate-900/40 text-slate-300 hover:bg-slate-900/55'
+                  }`}
+                >
+                  裝備
+                </button>
+                <div className="flex-1 min-w-[1rem]" />
+                {backpackTab === 'equip' ? (
+                  <div className="text-[10px] font-black text-slate-300 tabular-nums">
+                    裝備背包 {equipInstances?.length ?? 0}/{EQUIP_INSTANCE_CAP}
+                  </div>
+                ) : null}
+              </div>
+              <p className="text-[10px] text-slate-500 mt-2 leading-relaxed">
+                {backpackTab === 'items'
+                  ? '僅顯示可在戰鬥外使用、且背包持有數大於 0 的道具（食材與鍛造素材改由專用分頁檢視）；重要道具固定列於最上方。'
+                  : backpackTab === 'ingredients'
+                    ? '菜圃收成、釣魚、狩獵等的「新鮮食材」；持有數大於 0 時顯示，於餐酒館料理等系統消耗。'
+                    : backpackTab === 'forge'
+                      ? '休憩園挖礦與狩獵取得的礦石、魔物素材；持有數大於 0 時顯示，於鍛造所使用。'
+                      : '在此管理裝備實例；可鎖定防止誤賣（商店「出售裝備」不列出已鎖定與角色身上已裝備的實例）。'}
               </p>
             </div>
 
             <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4">
-              <div className="space-y-2">
-                {(() => {
-                  const items = Object.values(ITEM_CATALOG)
-                    .filter((it) => !canUseInBattle(it))
-                    .filter((it) => getInvCount(itemInv, it.id) > 0)
-                    .sort((a, b) => {
-                      const ak = a.key ? 1 : 0;
-                      const bk = b.key ? 1 : 0;
-                      if (bk !== ak) return bk - ak;
-                      return 0;
-                    });
-                  if (items.length === 0) {
-                    return (
-                      <p className="text-center text-[11px] font-bold text-slate-500 py-10">目前沒有可在這裡使用的持有道具。</p>
-                    );
-                  }
-                  return items.map((it) => {
-                    const owned = getInvCount(itemInv, it.id);
-                    const disabled = it.effect?.type === 'none' || it.effect?.type === 'keyItem';
-                    return (
-                      <div key={it.id} className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="text-[12px] font-black text-white truncate">{it.name}</p>
-                            <p className="text-[10px] font-bold text-slate-300 mt-1 leading-snug">
-                              持有 {owned} · {it.desc}
-                            </p>
-                          </div>
-                          <button
-                            type="button"
-                            disabled={disabled}
-                            onClick={() => {
-                              if (owned <= 0) return;
-                              if (it.effect?.type === 'none') return;
-                              if (it.effect?.type === 'expStageTicket') {
-                                const before = getExpStageRunsLeft();
-                                const after = refillExpStageRuns(it.effect?.amount ?? 1);
-                                if (after <= before) {
-                                  setStageNotice(`經驗關卡次數已滿（${after}/${EXP_STAGE_DAILY_LIMIT}）。入場券未消耗。`);
+              {backpackTab === 'items' || backpackTab === 'ingredients' || backpackTab === 'forge' ? (
+                <div className="space-y-2">
+                  {(() => {
+                    const bySubTab = (it) => {
+                      if (backpackTab === 'items') {
+                        return !isBackpackIngredientId(it.id) && !isBackpackForgeId(it.id);
+                      }
+                      if (backpackTab === 'ingredients') return isBackpackIngredientId(it.id);
+                      return isBackpackForgeId(it.id);
+                    };
+                    const items = Object.values(ITEM_CATALOG)
+                      .filter((it) => !canUseInBattle(it))
+                      .filter((it) => getInvCount(itemInv, it.id) > 0)
+                      .filter(bySubTab)
+                      .sort((a, b) => {
+                        const ak = a.key ? 1 : 0;
+                        const bk = b.key ? 1 : 0;
+                        if (bk !== ak) return bk - ak;
+                        return 0;
+                      });
+                    if (items.length === 0) {
+                      const emptyMsg =
+                        backpackTab === 'ingredients'
+                          ? '目前沒有新鮮食材。'
+                          : backpackTab === 'forge'
+                            ? '目前沒有鍛造素材。'
+                            : '目前沒有可在這裡使用的持有道具。';
+                      return (
+                        <p className="text-center text-[11px] font-bold text-slate-500 py-10">{emptyMsg}</p>
+                      );
+                    }
+                    const materialSub = backpackTab === 'ingredients' || backpackTab === 'forge';
+                    return items.map((it) => {
+                      const owned = getInvCount(itemInv, it.id);
+                      const disabled = materialSub
+                        ? true
+                        : it.effect?.type === 'none' ||
+                          it.effect?.type === 'keyItem' ||
+                          it.effect?.type === 'facilityVoucher' ||
+                          it.effect?.type === 'material' ||
+                          it.effect?.type === 'gardenSeed';
+                      return (
+                        <div key={it.id} className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-[12px] font-black text-white truncate">{it.name}</p>
+                              <p className="text-[10px] font-bold text-slate-300 mt-1 leading-snug">
+                                持有 {owned} · {it.desc}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={disabled}
+                              onClick={() => {
+                                if (materialSub || owned <= 0) return;
+                                if (it.effect?.type === 'none') return;
+                                if (it.effect?.type === 'expStageTicket') {
+                                  const before = getExpStageRunsLeft();
+                                  const after = refillExpStageRuns(it.effect?.amount ?? 1);
+                                  if (after <= before) {
+                                    setStageNotice(`經驗關卡次數已滿（${after}/${EXP_STAGE_DAILY_LIMIT}）。入場券未消耗。`);
+                                    setExpRunsLeft(after);
+                                    return;
+                                  }
+                                  setItemInv((inv) => incInv(inv, it.id, -1));
+                                  setStageNotice(`經驗關卡次數 +1（${after}/${EXP_STAGE_DAILY_LIMIT}）。`);
                                   setExpRunsLeft(after);
                                   return;
                                 }
+                                if (it.effect?.type === 'manualLevelUp') {
+                                  setUseItemTargetPick({
+                                    itemId: it.id,
+                                    amount: it.effect?.amount ?? 1,
+                                    maxLevel: it.effect?.maxLevel ?? 10,
+                                  });
+                                  return;
+                                }
                                 setItemInv((inv) => incInv(inv, it.id, -1));
-                                setStageNotice(`經驗關卡次數 +1（${after}/${EXP_STAGE_DAILY_LIMIT}）。`);
-                                setExpRunsLeft(after);
-                                return;
-                              }
-                              if (it.effect?.type === 'manualLevelUp') {
-                                setUseItemTargetPick({
-                                  itemId: it.id,
-                                  amount: it.effect?.amount ?? 1,
-                                  maxLevel: it.effect?.maxLevel ?? 10,
-                                });
-                                return;
-                              }
-                              setItemInv((inv) => incInv(inv, it.id, -1));
-                              setShopDialog(`你使用了「${it.name}」。`);
-                            }}
-                            className={`shrink-0 px-4 py-2 rounded-xl border text-[10px] font-black ${
-                              disabled
-                                ? 'bg-white/5 border-white/10 text-slate-600 cursor-not-allowed opacity-70'
-                                : 'bg-emerald-600/25 hover:bg-emerald-600/40 border-emerald-500/35 text-emerald-100'
-                            }`}
-                          >
-                            使用
-                          </button>
+                                setShopDialog(`你使用了「${it.name}」。`);
+                              }}
+                              className={`shrink-0 px-4 py-2 rounded-xl border text-[10px] font-black ${
+                                disabled
+                                  ? 'bg-white/5 border-white/10 text-slate-600 cursor-not-allowed opacity-70'
+                                  : 'bg-emerald-600/25 hover:bg-emerald-600/40 border-emerald-500/35 text-emerald-100'
+                              }`}
+                            >
+                              使用
+                            </button>
+                          </div>
+                          {backpackTab === 'ingredients' ? (
+                            <p className="text-[9px] text-slate-600 mt-2 font-bold">新鮮食材於餐酒館料理等系統消耗，無法從此處直接使用</p>
+                          ) : backpackTab === 'forge' ? (
+                            <p className="text-[9px] text-slate-600 mt-2 font-bold">鍛造素材於鍛造所強化與製作時消耗，無法從此處直接使用</p>
+                          ) : it.effect?.type === 'none' ? (
+                            <p className="text-[9px] text-slate-600 mt-2 font-bold">此道具效果尚未實裝</p>
+                          ) : it.effect?.type === 'keyItem' ? (
+                            <p className="text-[9px] text-slate-600 mt-2 font-bold">重要道具不可使用</p>
+                          ) : it.effect?.type === 'facilityVoucher' ? (
+                            <p className="text-[9px] text-slate-600 mt-2 font-bold">於鍛造所／訓練場／餐酒館結帳時自動優先折抵，無法從此處消耗</p>
+                          ) : it.effect?.type === 'material' ? (
+                            <p className="text-[9px] text-slate-600 mt-2 font-bold">生活材料，請於休憩園或其他系統使用</p>
+                          ) : it.effect?.type === 'gardenSeed' ? (
+                            <p className="text-[9px] text-slate-600 mt-2 font-bold">種子僅能在大廳「休憩園」菜圃播種</p>
+                          ) : null}
                         </div>
-                        {it.effect?.type === 'none' ? (
-                          <p className="text-[9px] text-slate-600 mt-2 font-bold">此道具效果尚未實裝</p>
-                        ) : it.effect?.type === 'keyItem' ? (
-                          <p className="text-[9px] text-slate-600 mt-2 font-bold">重要道具不可使用</p>
-                        ) : null}
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
+                      );
+                    });
+                  })()}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {(() => {
+                    const list = (equipInstances ?? []).slice().sort((a, b) => {
+                      const al = a?.locked ? 1 : 0;
+                      const bl = b?.locked ? 1 : 0;
+                      if (bl !== al) return bl - al;
+                      const ao = equippedEidOwner?.[a?.eid] ? 1 : 0;
+                      const bo = equippedEidOwner?.[b?.eid] ? 1 : 0;
+                      if (bo !== ao) return bo - ao;
+                      return String(a?.itemId || '').localeCompare(String(b?.itemId || ''));
+                    });
+                    if (list.length === 0) {
+                      return <p className="text-center text-[11px] font-bold text-slate-500 py-10">目前沒有裝備。</p>;
+                    }
+                    return list.map((inst) => {
+                      const it = getEquipItem(inst.itemId);
+                      if (!it) return null;
+                      const owner = equippedEidOwner?.[inst.eid] ?? null;
+                      const ownerName = owner ? HEROES_BASE.find((h) => h.id === owner)?.name ?? owner : null;
+                            const fxLine = (inst.affixes ?? []).map((a) => formatAffixZh(a)).join(' · ');
+                      return (
+                        <div key={inst.eid} className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-[12px] font-black text-white truncate">
+                                {it.name}{' '}
+                                <span className="text-[10px] font-black text-slate-500 tabular-nums">#{String(inst.eid).slice(-4)}</span>
+                              </p>
+                              <p className="text-[10px] font-bold text-slate-300 mt-1 leading-snug">
+                                {it.slot === 'weapon' ? '武器' : it.slot === 'offhand' ? '副手' : '防具'}
+                                {ownerName ? ` · 裝備中：${ownerName}` : ''}
+                                {inst.locked ? ' · 已鎖定' : ''}
+                              </p>
+                              <p className="text-[10px] font-black text-slate-200/90 mt-2">{fxLine ? fxLine : '（無詞條）'}</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEquipInstances((list) =>
+                                  Array.isArray(list) ? list.map((x) => (x.eid === inst.eid ? { ...x, locked: !x.locked } : x)) : []
+                                )
+                              }
+                              className={`shrink-0 px-4 py-2 rounded-xl border text-[10px] font-black ${
+                                inst.locked
+                                  ? 'bg-violet-600/25 hover:bg-violet-600/40 border-violet-500/35 text-violet-100'
+                                  : 'bg-white/5 hover:bg-white/10 border-white/10 text-slate-200'
+                              }`}
+                            >
+                              {inst.locked ? '解鎖' : '鎖定'}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              )}
             </div>
             {useItemTargetPick ? (
               <>
@@ -4194,9 +6012,12 @@ export default function App() {
                     要讓誰使用「{getItem(useItemTargetPick?.itemId)?.name ?? '修煉手冊'}」？
                   </p>
                   <div className="mt-3 grid grid-cols-2 gap-2">
-                    {partyIds.map((hid) => {
+                    {(() => {
+                      const xpMap = loadHeroXpMap();
+                      return partyIds.map((hid) => {
                       const hero = HEROES_BASE.find((h) => h.id === hid);
                       if (!hero) return null;
+                      const lv = xpMap?.[hid]?.level ?? 1;
                       return (
                         <button
                           key={hid}
@@ -4218,11 +6039,15 @@ export default function App() {
                           }}
                           className="rounded-xl border border-white/10 bg-black/30 hover:bg-black/40 px-3 py-2 text-left active:scale-[0.99] transition-all"
                         >
-                          <p className="text-[11px] font-black text-white truncate">{hero.name}</p>
+                          <p className="text-[11px] font-black text-white truncate">
+                            {hero.name}
+                            <span className="ml-1 text-[10px] font-black text-slate-300">Lv.{lv}</span>
+                          </p>
                           <p className="text-[9px] font-bold text-slate-400 mt-1">隊伍成員</p>
                         </button>
                       );
-                    })}
+                      });
+                    })()}
                   </div>
                   <button
                     type="button"
@@ -4238,7 +6063,24 @@ export default function App() {
         )}
 
         {scene === 'story' && (
-          <div className="flex-1 flex flex-col min-h-0 bg-[radial-gradient(circle_at_top,_#1e293b_0%,_#020617_70%)]">
+          <div className="flex-1 flex flex-col min-h-0 relative">
+            <div className="absolute inset-0 z-0 overflow-hidden" aria-hidden>
+              <div className="absolute inset-0" style={{ background: lobbyBgDef.fallback }} />
+              <img
+                key={lobbyBgDef.id}
+                src={lobbyBgDef.image}
+                alt=""
+                decoding="async"
+                draggable={false}
+                className={`absolute inset-0 h-full w-full min-h-full min-w-full object-cover object-[center_30%] max-sm:scale-[1.03] max-sm:origin-[center_30%] sm:object-center transition-opacity duration-500 ${
+                  lobbyBgImgVisible ? 'opacity-100' : 'opacity-0'
+                }`}
+                onLoad={() => setLobbyBgImgVisible(true)}
+                onError={() => setLobbyBgImgVisible(false)}
+              />
+              <div className="absolute inset-0 pointer-events-none bg-gradient-to-b from-slate-950/60 via-slate-950/25 to-slate-950/90 max-sm:from-slate-950/45 max-sm:via-slate-950/18 max-sm:to-slate-950/70" />
+            </div>
+            <div className="relative z-10 flex-1 flex flex-col min-h-0">
             <div className="shrink-0 px-4 pt-3 pb-2 border-b border-white/10">
               <button
                 type="button"
@@ -4271,7 +6113,8 @@ export default function App() {
               storyStageId === 'c4-epilogue' ||
               storyStageId === 'c5-story-1' ||
               storyStageId === 'c5-story-2' ||
-              storyStageId === 'c5-epilogue' ? (
+              storyStageId === 'c5-epilogue' ||
+              storyStageId === 'c6-story-1' ? (
                 <div className="max-w-5xl mx-auto">
                   {(() => {
                     const def =
@@ -4489,7 +6332,9 @@ export default function App() {
                               },
                               {
                                 who: '旁白',
-                                text: '普爾斯沿著高處殘梁巡視，試圖用視線串起地勢；白澤閉眼感應殘留的結界波動；布提婭貼著陰影滑行，指尖掠過刻痕尋找被藏起的記號；布布低聲祈禱，讓微光在岔路口一一亮起又熄滅。',
+                                text: isHeroUnlocked('bubu')
+                                  ? '普爾斯沿著高處殘梁巡視，試圖用視線串起地勢；白澤閉眼感應殘留的結界波動；布提婭貼著陰影滑行，指尖掠過刻痕尋找被藏起的記號；布布低聲祈禱，讓微光在岔路口一一亮起又熄滅。'
+                                  : '普爾斯沿著高處殘梁巡視，試圖用視線串起地勢；白澤閉眼感應殘留的結界波動；布提婭貼著陰影滑行，指尖掠過刻痕尋找被藏起的記號。',
                               },
                               {
                                 who: '旁白',
@@ -4501,7 +6346,7 @@ export default function App() {
                               },
                               { who: '白澤', text: '……有東西被藏得很深。表面只有迷宮，真正的核心不在我們剛才踏過的任何一條主路。' },
                               { who: '布提婭', text: '刻痕也很狡猾。像故意讓人繞圈——我差點以為自己回到原點三次。' },
-                              { who: '布布', text: '光線的回應很模糊……像是被厚層岩石蓋住了。' },
+                              ...(isHeroUnlocked('bubu') ? [{ who: '布布', text: '光線的回應很模糊……像是被厚層岩石蓋住了。' }] : []),
                               { who: '普爾斯', text: '也就是說，我們還缺一把「鑰匙」，或一個入口。先休整——' },
                               {
                                 who: '熊吉',
@@ -4522,7 +6367,7 @@ export default function App() {
                                 who: '熊吉',
                                 text: '欸？所以是我……坐對了？',
                               },
-                              { who: '布布', text: '熊吉，謝謝你願意「坐下來」休息。' },
+                              ...(isHeroUnlocked('bubu') ? [{ who: '布布', text: '熊吉，謝謝你願意「坐下來」休息。' }] : []),
                               { who: '熊吉', text: '不要講得好像我是故意的好不好！' },
                               {
                                 who: '普爾斯',
@@ -4631,7 +6476,7 @@ export default function App() {
                               { who: '普爾斯', text: '對，蜂蜜。' },
                               {
                                 who: '熊吉',
-                                text: '……成交。但先聲明：不準再偷吃我的便當袋！祈願也只能在戰鬥的時候啦！',
+                                text: '……成交。但先聲明：不準再偷吃我的便當袋！星曉祈願也只能在戰鬥的時候啦！',
                               },
                               {
                                 who: '光之幼靈',
@@ -4640,6 +6485,37 @@ export default function App() {
                               {
                                 who: '旁白',
                                 text: '你們收整行囊，火光在通道盡頭搖晃。新的旅伴蹭了蹭你的鞋尖，像把「星曉」兩個字輕輕繫在未來的路上。',
+                              },
+                            ],
+                          }
+                        : storyStageId === 'c6-story-1'
+                        ? {
+                            leftCgLabel: '黯潮深淵（入口）',
+                            rightCgLabel: '普爾斯一行人 半身 CG',
+                            endBtn: '進入深淵',
+                            onEnd: () => {
+                              completeStage('c6-story-1');
+                              setStoryStageId(null);
+                              setSelectedChapterId('ch-6');
+                              setSelectedStageId('c6-battle-1');
+                              setScene('chapter');
+                            },
+                            lines: [
+                              {
+                                who: '旁白',
+                                text: '黯潮深淵的入口像一道張開的傷口。從裂縫裡湧出的黑潮帶著刺骨的寒意與令人作嘔的腥甜，彷彿連光都會被吞沒。',
+                              },
+                              {
+                                who: '旁白',
+                                text: '深淵散發出邪惡的魔力，使大家顫抖不已。那股波動貼著皮膚往骨頭裡鑽，讓人本能想轉身逃離。',
+                              },
+                              { who: '熊吉', text: '這地方……真的不是什麼「走錯路」可以解釋的欸……我、我雞皮疙瘩都起來了。' },
+                              { who: '布布', text: '大家靠近一點。我會盡力穩住你們的心跳……別讓恐懼把隊伍拆散。' },
+                              { who: '白澤', text: '邪氣很濃，但不是無法對抗。只要步伐一致，就不會被它逐個吞下。' },
+                              { who: '普爾斯', text: '互相打氣一下。接下來每一步都可能是陷阱——但我們會一起走過去。' },
+                              {
+                                who: '旁白',
+                                text: '你們交換了一個短促卻堅定的眼神。呼吸仍顫，腳步卻沒有退後——在互相打氣後，你們決定邁向深淵。',
                               },
                             ],
                           }
@@ -4721,7 +6597,7 @@ export default function App() {
                             rightCgLabel: '布提婭＆普爾斯一行人 半身 CG',
                             endBtn: '前往隊伍編輯（解鎖布提婭）',
                             onEnd: () => {
-                              unlockHero('h4');
+                              unlockHero('butiya');
                               completeStage('c3-story-3');
                               setPartyNotice('新同伴加入：布提婭已解鎖。請前往「隊伍編輯」配置新角色上場。');
                               setStoryStageId(null);
@@ -4840,7 +6716,7 @@ export default function App() {
                             rightCgLabel: '普爾斯＆熊吉 半身 CG',
                             endBtn: '前往隊伍編輯（解鎖白澤）',
                             onEnd: () => {
-                              unlockHero('h3');
+                              unlockHero('baize');
                               completeStage('c2-story-1');
                               setPartyNotice('新同伴加入：白澤已解鎖。請前往「隊伍編輯」配置新角色上場。');
                               setStoryStageId(null);
@@ -4910,7 +6786,7 @@ export default function App() {
                             rightCgLabel: '普爾斯 半身 CG',
                             endBtn: '一起前往（解鎖熊吉）',
                             onEnd: () => {
-                              unlockHero('h2');
+                              unlockHero('xiongji');
                               completeStage('c1-story-2');
                               setPartyNotice('新同伴加入：熊吉已解鎖。請前往「隊伍編輯」將熊吉加入上陣名單。');
                               setStoryStageId(null);
@@ -5088,6 +6964,7 @@ export default function App() {
               </div>
               )}
             </div>
+            </div>
           </div>
         )}
 
@@ -5104,10 +6981,7 @@ export default function App() {
               </button>
               <h2 className="text-lg font-black italic text-white tracking-tight">商店</h2>
               <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">
-                初始僅販售治療藥水；持有 <span className="text-violet-300 font-black">1</span> 顆淨化稜晶解鎖魔力藥水與下級修煉手冊，
-                <span className="text-violet-300 font-black">2</span> 顆解鎖裝備買賣、下級修煉手冊+與萬靈藥；
-                <span className="text-violet-300 font-black">3</span> 顆再解鎖進階裝備、中級修煉手冊（Lv.30 以下升 1 級）、治癒粉塵（全體補血）與中級治療藥水；
-                <span className="text-violet-300 font-black">4</span> 顆再解鎖中級魔力藥水與中級修煉手冊+（Lv.40 以下升 1 級）。
+                販售選項會依照你持有的<span className="text-violet-300 font-black">淨化稜晶</span>數量逐步解鎖。詳細規則請看右上角「?」說明。
               </p>
             </div>
 
@@ -5200,80 +7074,150 @@ export default function App() {
                       </div>
                     ) : (
                     <div className="space-y-2">
-                      {Object.values(EQUIPMENT_CATALOG)
-                        .filter((it) => getShopPrismCount() >= (it.shopPrismMin ?? 2))
-                        .filter((it) => shopMode !== 'sell-equip' || getEquipInvCount(equipInv, it.id) > 0)
-                        .map((it) => {
-                        const owned = getEquipInvCount(equipInv, it.id);
-                        const sell = getEquipSellPrice(it);
-                        const disabledSell = owned <= 0;
-                        return (
-                          <div key={it.id} className="rounded-xl border border-white/10 bg-black/30 px-3 py-2">
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0">
-                                <p className="text-[11px] font-black text-white truncate">{it.name}</p>
-                                <p className="text-[10px] font-bold text-slate-300 mt-1 leading-snug">
-                                  {it.slot === 'weapon' ? '武器' : it.slot === 'offhand' ? '副手' : '防具'} · 持有 {owned}
-                                </p>
-                              </div>
-                              {shopMode === 'buy-equip' ? (
-                                <button
-                                  type="button"
-                                  onClick={() => buyEquip(it.id)}
-                                  className="shrink-0 px-3 py-2 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/45 border border-emerald-500/40 text-[10px] font-black text-emerald-100 tabular-nums"
-                                >
-                                  買 {it.price}
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  disabled={disabledSell}
-                                  onClick={() => sellEquip(it.id)}
-                                  className={`shrink-0 px-3 py-2 rounded-xl border text-[10px] font-black tabular-nums ${
-                                    disabledSell
-                                      ? 'bg-white/5 border-white/10 text-slate-600 cursor-not-allowed opacity-70'
-                                      : 'bg-amber-600/25 hover:bg-amber-600/40 border-amber-500/35 text-amber-100'
-                                  }`}
-                                >
-                                  賣 +{sell}
-                                </button>
-                              )}
-                            </div>
-                            <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-black text-slate-200 tabular-nums">
-                              {it.stats?.atk ? (
-                                <span className="inline-flex items-center gap-1">
-                                  <Sword size={12} className="text-amber-300" /> +{it.stats.atk}
-                                </span>
-                              ) : null}
-                              {it.stats?.matk ? (
-                                <span className="inline-flex items-center gap-1">
-                                  <Sparkles size={12} className="text-violet-300" /> +{it.stats.matk}
-                                </span>
-                              ) : null}
-                              {it.stats?.def ? (
-                                <span className="inline-flex items-center gap-1">
-                                  <Shield size={12} className="text-sky-300" /> +{it.stats.def}
-                                </span>
-                              ) : null}
-                              {it.stats?.mdef ? (
-                                <span className="inline-flex items-center gap-1">
-                                  <Sparkles size={12} className="text-indigo-300" /> 魔抗+{it.stats.mdef}
-                                </span>
-                              ) : null}
-                              {it.stats?.hp ? (
-                                <span className="inline-flex items-center gap-1">
-                                  <Heart size={12} className="text-rose-300" /> +{it.stats.hp}
-                                </span>
-                              ) : null}
-                              {it.stats?.spd ? (
-                                <span className="inline-flex items-center gap-1">
-                                  <Wind size={12} className="text-emerald-300" /> {it.stats.spd > 0 ? `+${it.stats.spd}` : it.stats.spd}
-                                </span>
-                              ) : null}
-                            </div>
-                          </div>
-                        );
-                      })}
+                      {shopMode === 'buy-equip'
+                        ? Object.values(EQUIPMENT_CATALOG)
+                            .filter((it) => getShopPrismCount() >= (it.shopPrismMin ?? 2))
+                            .map((it) => {
+                              const sell = getEquipSellPrice(it);
+                              return (
+                                <div key={it.id} className="rounded-xl border border-white/10 bg-black/30 px-3 py-2">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <p className="text-[11px] font-black text-white truncate">{it.name}</p>
+                                      <p className="text-[10px] font-bold text-slate-300 mt-1 leading-snug">
+                                        {it.slot === 'weapon' ? '武器' : it.slot === 'offhand' ? '副手' : '防具'} · 裝備背包 {(equipInstances?.length ?? 0)}/{EQUIP_INSTANCE_CAP}
+                                      </p>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => buyEquip(it.id)}
+                                      className="shrink-0 px-3 py-2 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/45 border border-emerald-500/40 text-[10px] font-black text-emerald-100 tabular-nums"
+                                    >
+                                      買 {it.price}
+                                    </button>
+                                  </div>
+                                  <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-black text-slate-200 tabular-nums">
+                                    {it.stats?.atk ? (
+                                      <span className="inline-flex items-center gap-1">
+                                        <Sword size={12} className="text-amber-300" /> +{it.stats.atk}
+                                      </span>
+                                    ) : null}
+                                    {it.stats?.matk ? (
+                                      <span className="inline-flex items-center gap-1">
+                                        <Sparkles size={12} className="text-violet-300" /> +{it.stats.matk}
+                                      </span>
+                                    ) : null}
+                                    {it.stats?.def ? (
+                                      <span className="inline-flex items-center gap-1">
+                                        <Shield size={12} className="text-sky-300" /> +{it.stats.def}
+                                      </span>
+                                    ) : null}
+                                    {it.stats?.mdef ? (
+                                      <span className="inline-flex items-center gap-1">
+                                        <Sparkles size={12} className="text-indigo-300" /> 魔抗+{it.stats.mdef}
+                                      </span>
+                                    ) : null}
+                                    {it.stats?.hp ? (
+                                      <span className="inline-flex items-center gap-1">
+                                        <Heart size={12} className="text-rose-300" /> +{it.stats.hp}
+                                      </span>
+                                    ) : null}
+                                    {it.stats?.spd ? (
+                                      <span className="inline-flex items-center gap-1">
+                                        <Wind size={12} className="text-emerald-300" /> {it.stats.spd > 0 ? `+${it.stats.spd}` : it.stats.spd}
+                                      </span>
+                                    ) : null}
+                                    <span className="inline-flex items-center gap-1 text-slate-500 font-bold">賣出價 +{sell}</span>
+                                  </div>
+                                </div>
+                              );
+                            })
+                        : (equipInstances ?? [])
+                            .filter((inst) =>
+                              shopMode === 'sell-equip' ? !inst?.locked && !equippedEidOwner?.[inst.eid] : true
+                            )
+                            .map((inst) => {
+                              const it = getEquipItem(inst.itemId);
+                              if (!it) return null;
+                              const sell = getEquipSellPrice(it);
+                              const owner = equippedEidOwner?.[inst.eid] ?? null;
+                              const ownerName = owner ? HEROES_BASE.find((h) => h.id === owner)?.name ?? owner : null;
+                              const locked = !!inst.locked;
+                              const disabledSell = !!owner || locked;
+                      const fxLine = (inst.affixes ?? []).map((a) => formatAffixZh(a)).join(' · ');
+                              return (
+                                <div key={inst.eid} className="rounded-xl border border-white/10 bg-black/30 px-3 py-2">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <p className="text-[11px] font-black text-white truncate">
+                                        {it.name} <span className="text-slate-500 font-bold">#{String(inst.eid).slice(-4)}</span>
+                                      </p>
+                                      <p className="text-[10px] font-bold text-slate-300 mt-1 leading-snug">
+                                        {it.slot === 'weapon' ? '武器' : it.slot === 'offhand' ? '副手' : '防具'}
+                                        {ownerName ? ` · 裝備中：${ownerName}` : ''}
+                                        {locked ? ' · 已鎖定' : ''}
+                                      </p>
+                                    </div>
+                                    <div className="shrink-0 flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        disabled={disabledSell}
+                                        onClick={() => sellEquip(inst.eid)}
+                                        className={`px-3 py-2 rounded-xl border text-[10px] font-black tabular-nums ${
+                                          disabledSell
+                                            ? 'bg-white/5 border-white/10 text-slate-600 cursor-not-allowed opacity-70'
+                                            : 'bg-amber-600/25 hover:bg-amber-600/40 border-amber-500/35 text-amber-100'
+                                        }`}
+                                      >
+                                        賣 +{sell}
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-black text-slate-200 tabular-nums">
+                                    {it.stats?.atk ? (
+                                      <span className="inline-flex items-center gap-1">
+                                        <Sword size={12} className="text-amber-300" /> +{it.stats.atk}
+                                      </span>
+                                    ) : null}
+                                    {it.stats?.matk ? (
+                                      <span className="inline-flex items-center gap-1">
+                                        <Sparkles size={12} className="text-violet-300" /> +{it.stats.matk}
+                                      </span>
+                                    ) : null}
+                                    {it.stats?.def ? (
+                                      <span className="inline-flex items-center gap-1">
+                                        <Shield size={12} className="text-sky-300" /> +{it.stats.def}
+                                      </span>
+                                    ) : null}
+                                    {it.stats?.mdef ? (
+                                      <span className="inline-flex items-center gap-1">
+                                        <Sparkles size={12} className="text-indigo-300" /> 魔抗+{it.stats.mdef}
+                                      </span>
+                                    ) : null}
+                                    {it.stats?.hp ? (
+                                      <span className="inline-flex items-center gap-1">
+                                        <Heart size={12} className="text-rose-300" /> +{it.stats.hp}
+                                      </span>
+                                    ) : null}
+                                    {it.stats?.spd ? (
+                                      <span className="inline-flex items-center gap-1">
+                                        <Wind size={12} className="text-emerald-300" /> {it.stats.spd > 0 ? `+${it.stats.spd}` : it.stats.spd}
+                                      </span>
+                                    ) : null}
+                                    {fxLine ? (
+                                      <span className="text-[10px] font-black text-slate-300">{fxLine}</span>
+                                    ) : (
+                                      <span className="text-[10px] font-bold text-slate-600">（無詞條）</span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })
+                            .filter(Boolean)}
+                      {shopMode === 'sell-equip' &&
+                      ((equipInstances ?? []).filter((x) => !x?.locked && !equippedEidOwner?.[x.eid]).length ?? 0) === 0 ? (
+                        <div className="h-24 flex items-center justify-center text-slate-600 text-[10px] font-bold">（沒有未裝備且未鎖定的裝備可出售）</div>
+                      ) : null}
                     </div>
                     )
                   ) : (
@@ -5351,7 +7295,24 @@ export default function App() {
         )}
 
         {scene === 'battle' && (
-          <div className="flex-1 flex flex-col min-h-0 p-4 gap-2">
+          <div className="flex-1 flex flex-col min-h-0 relative">
+            <div className="absolute inset-0 z-0 overflow-hidden" aria-hidden>
+              <div className="absolute inset-0" style={{ background: lobbyBgDef.fallback }} />
+              <img
+                key={lobbyBgDef.id}
+                src={lobbyBgDef.image}
+                alt=""
+                decoding="async"
+                draggable={false}
+                className={`absolute inset-0 h-full w-full min-h-full min-w-full object-cover object-[center_30%] max-sm:scale-[1.03] max-sm:origin-[center_30%] sm:object-center transition-opacity duration-500 ${
+                  lobbyBgImgVisible ? 'opacity-100' : 'opacity-0'
+                }`}
+                onLoad={() => setLobbyBgImgVisible(true)}
+                onError={() => setLobbyBgImgVisible(false)}
+              />
+              <div className="absolute inset-0 pointer-events-none bg-gradient-to-b from-slate-950/65 via-slate-950/40 to-slate-950/95" />
+            </div>
+            <div className="relative z-10 flex-1 flex flex-col min-h-0 p-4 gap-2">
             {heroes[0]?.captainPassive ? (
               <div className="shrink-0 rounded-lg border border-amber-500/25 bg-amber-950/40 px-2 py-1.5 text-center">
                 <p className="text-[8px] text-amber-100/95 leading-snug">
@@ -5394,14 +7355,14 @@ export default function App() {
                   tabIndex={0}
                   onClick={() => {
                     const canTargetEnemy =
-                      targetMode === 'attack' || targetMode === 'skill' || targetMode === 'item-enemy';
+                      targetMode === 'attack' || targetMode === 'skill' || targetMode === 'skill-flex' || targetMode === 'item-enemy';
                     if (targetMode === 'item-enemy' && pickedItemId) void onMonsterItemInvertSelect(m.id);
                     else if (canTargetEnemy) onTargetSelect(m.id);
                     else setStatusFocus({ side: 'monster', id: m.id });
                   }}
                   onKeyDown={(e) => {
                     const canTargetEnemy =
-                      targetMode === 'attack' || targetMode === 'skill' || targetMode === 'item-enemy';
+                      targetMode === 'attack' || targetMode === 'skill' || targetMode === 'skill-flex' || targetMode === 'item-enemy';
                     if (e.key === 'Enter' || e.key === ' ') {
                       if (targetMode === 'item-enemy' && pickedItemId) void onMonsterItemInvertSelect(m.id);
                       else if (canTargetEnemy) onTargetSelect(m.id);
@@ -5413,7 +7374,8 @@ export default function App() {
                 >
                   <div
                     className={`w-14 h-14 rounded-full bg-slate-900 border-2 flex items-center justify-center overflow-hidden transition-all ${
-                      (targetMode === 'attack' || targetMode === 'skill' || targetMode === 'item-enemy') && m.curHp > 0
+                      (targetMode === 'attack' || targetMode === 'skill' || targetMode === 'skill-flex' || targetMode === 'item-enemy') &&
+                      m.curHp > 0
                         ? 'border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)] animate-pulse'
                         : 'border-white/10'
                     } ${statusFocus?.side === 'monster' && statusFocus.id === m.id ? 'ring-2 ring-cyan-300/70' : ''}`}
@@ -5491,9 +7453,16 @@ export default function App() {
 
             <div className="flex-1 min-h-0 shrink" aria-hidden="true" />
             <div className="shrink-0 pb-1">
-              {activeUnit?.isHero && !isProcessing && (
-                <div className="flex flex-col gap-1.5 animate-in fade-in slide-in-from-bottom-2 duration-300 px-0.5">
-                  {skillMenuOpen ? (
+              <div className="flex flex-col gap-1.5 animate-in fade-in slide-in-from-bottom-2 duration-300 px-0.5">
+                {!activeUnit?.isHero || isProcessing ? (
+                  <div className="grid grid-cols-4 gap-1.5">
+                    <CmdBtn icon={<Sword size={14} />} label="攻擊" color="bg-red-600" disabled />
+                    <CmdBtn icon={<ShieldAlert size={14} />} label="防禦" color="bg-blue-600" disabled />
+                    <CmdBtn icon={<Sparkles size={14} />} label="技能" color="bg-purple-600" disabled />
+                    <CmdBtn icon={<Backpack size={14} />} label="道具" color="bg-slate-700" disabled />
+                  </div>
+                ) : (
+                  skillMenuOpen ? (
                     <div className="bg-purple-950/80 border border-purple-500/40 rounded-xl p-2 shadow-lg ring-1 ring-purple-500/25">
                       <div className="flex items-center justify-between gap-2 mb-2 px-0.5">
                         <span className="text-[9px] font-black text-purple-200 uppercase tracking-wide">技能</span>
@@ -5507,8 +7476,9 @@ export default function App() {
                         </button>
                       </div>
                       <div className="grid grid-cols-2 gap-1.5">
-                        {getSkillsForHero(activeUnit).map((s) => {
-                          const lackMp = activeUnit.curMp < s.mpCost;
+                        {getBattleSkillsForHero(activeUnit).map((s) => {
+                          const mpCost = getSkillMpCostForCaster(s, activeUnit);
+                          const lackMp = activeUnit.curMp < mpCost;
                           return (
                             <button
                               key={s.id}
@@ -5535,7 +7505,7 @@ export default function App() {
                               onClick={() => {
                                 if (longPressFiredRef.current) return;
                                 if (lackMp) {
-                                  setLogs([`MP 不足，無法施放「${s.name}」（需 ${s.mpCost}）`, ...logs].slice(0, 5));
+                                  setLogs([`MP 不足，無法施放「${s.name}」（需 ${mpCost}）`, ...logs].slice(0, 5));
                                   return;
                                 }
                                 setPickedSkill(s);
@@ -5552,6 +7522,10 @@ export default function App() {
                                   }
                                   if (s?.effect?.type === 'jackPhantomDrawAll') {
                                     castJackPhantomDrawAll(s);
+                                    return;
+                                  }
+                                  if (s?.effect?.type === 'halloweenTrickOrTreat') {
+                                    castHalloweenTrickOrTreat(s);
                                     return;
                                   }
                                   if (s?.effect?.type === 'buff') {
@@ -5583,7 +7557,10 @@ export default function App() {
                                     return;
                                   }
                                 }
-                                if (t.requiresTarget) setTargetMode(t.side === 'ally' ? 'skill-ally' : 'skill');
+                                if (t.requiresTarget) {
+                                  if (t.side === 'both') setTargetMode('skill-flex');
+                                  else setTargetMode(t.side === 'ally' ? 'skill-ally' : 'skill');
+                                }
                               }}
                               className={`flex flex-col items-start justify-center rounded-lg border px-2 py-1.5 text-left transition-all active:scale-[0.98] ${
                                 lackMp
@@ -5592,7 +7569,7 @@ export default function App() {
                               }`}
                             >
                               <span className="text-[9px] font-black text-purple-100 leading-tight line-clamp-2">{s.name}</span>
-                              <span className="text-[8px] font-bold text-cyan-300/90 mt-0.5">MP {s.mpCost}</span>
+                              <span className="text-[8px] font-bold text-cyan-300/90 mt-0.5">MP {mpCost}</span>
                             </button>
                           );
                         })}
@@ -5612,20 +7589,22 @@ export default function App() {
                         </button>
                       </div>
                       <div className="grid grid-cols-2 gap-1.5">
-                        {Object.values(ITEM_CATALOG)
-                          .filter((it) => getInvCount(itemInv, it.id) > 0)
-                          .map((it) => {
-                            const usable = canUseInBattle(it);
+                        {(() => {
+                          const owned = Object.values(ITEM_CATALOG).filter((it) => getInvCount(itemInv, it.id) > 0);
+                          const items = owned.filter((it) => canUseInBattle(it));
+                          if (items.length === 0) {
+                            return (
+                              <p className="col-span-2 text-[10px] text-slate-600 font-bold px-1 py-2">
+                                {owned.length === 0 ? '（背包是空的）' : '（沒有可在戰鬥中使用的道具）'}
+                              </p>
+                            );
+                          }
+                          return items.map((it) => {
                             return (
                               <button
                                 key={it.id}
                                 type="button"
-                                disabled={!usable}
                                 onClick={() => {
-                                  if (!usable) {
-                                    setLogs([`此道具尚未開放戰鬥使用：${it.name}`, ...logs].slice(0, 5));
-                                    return;
-                                  }
                                   const invert = isJackItemInvertActive(activeUnit);
                                   if (invert && jackInvertedItemIsAllyAllHeal(it)) {
                                     setItemMenuOpen(false);
@@ -5647,22 +7626,16 @@ export default function App() {
                                   setItemMenuOpen(false);
                                   setTargetMode('item');
                                 }}
-                                className={`flex flex-col items-start justify-center rounded-lg border px-2 py-1.5 text-left transition-all active:scale-[0.98] ${
-                                  usable
-                                    ? 'border-white/10 bg-white/5 hover:bg-white/10'
-                                    : 'border-white/5 bg-slate-900/40 text-slate-600 cursor-not-allowed opacity-60'
-                                }`}
+                                className="flex flex-col items-start justify-center rounded-lg border px-2 py-1.5 text-left transition-all active:scale-[0.98] border-white/10 bg-white/5 hover:bg-white/10"
                               >
                                 <span className="text-[9px] font-black text-slate-100 leading-tight line-clamp-2">{it.name}</span>
                                 <span className="text-[8px] font-bold text-slate-400 mt-0.5">x{getInvCount(itemInv, it.id)}</span>
                                 <span className="text-[8px] font-bold text-slate-500 mt-0.5 line-clamp-1">{it.desc}</span>
                               </button>
                             );
-                          })}
+                          });
+                        })()}
                       </div>
-                      {Object.values(ITEM_CATALOG).every((it) => getInvCount(itemInv, it.id) <= 0) ? (
-                        <p className="text-[10px] text-slate-600 font-bold px-1 py-2">（背包是空的）</p>
-                      ) : null}
                     </div>
                   ) : targetMode ? (
                     <div className="bg-blue-600/20 border border-blue-500/50 p-2 rounded-xl flex items-center justify-between shadow-lg ring-1 ring-blue-500/30 gap-2">
@@ -5733,9 +7706,9 @@ export default function App() {
                         }}
                       />
                     </div>
-                  )}
-                </div>
-              )}
+                  )
+                )}
+              </div>
             </div>
 
             <div
@@ -5762,13 +7735,13 @@ export default function App() {
                     role={targetMode === 'skill-ally' || targetMode === 'item' ? 'button' : undefined}
                     tabIndex={targetMode === 'skill-ally' || targetMode === 'item' ? 0 : undefined}
                     onClick={() => {
-                      if (targetMode === 'skill-ally') onHeroTargetSelect(h.id);
+                      if (targetMode === 'skill-ally' || targetMode === 'skill-flex') onHeroTargetSelect(h.id);
                       else if (targetMode === 'item') onHeroItemSelect(h.id);
                       else setStatusFocus({ side: 'hero', id: h.id });
                     }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
-                        if (targetMode === 'skill-ally') onHeroTargetSelect(h.id);
+                        if (targetMode === 'skill-ally' || targetMode === 'skill-flex') onHeroTargetSelect(h.id);
                         else if (targetMode === 'item') onHeroItemSelect(h.id);
                       }
                     }}
@@ -5816,8 +7789,22 @@ export default function App() {
                   <span className="text-[9px] font-bold mt-1 w-full text-center text-slate-100 leading-tight line-clamp-2 break-words hyphens-none px-0.5">
                     {h.name}
                   </span>
+                  {(() => {
+                    const t = h.type;
+                    const map = {
+                      fire: { name: '火', cls: 'text-red-300' },
+                      wind: { name: '風', cls: 'text-emerald-300' },
+                      water: { name: '水', cls: 'text-sky-300' },
+                      dark: { name: '暗', cls: 'text-violet-300' },
+                      light: { name: '光', cls: 'text-amber-200' },
+                    };
+                    const it = map[t];
+                    if (!it) return null;
+                    return <span className={`text-[8px] font-black mt-0.5 ${it.cls}`}>{it.name}</span>;
+                  })()}
                 </div>
               ))}
+            </div>
             </div>
           </div>
         )}
@@ -5929,7 +7916,8 @@ export default function App() {
             {(() => {
               const hero = HEROES_BASE.find((h) => h.id === equipModalHeroId);
               if (!hero) return null;
-              const equip = equipForHero(hero.id);
+              const equip2 = equipForHeroV2(hero.id);
+              const equip = equipItemIdsForHero(hero.id);
               const summary = getEquipSummary(equip);
 
               const renderStatIcons = (stats) => {
@@ -5967,33 +7955,70 @@ export default function App() {
                 return parts.length ? `${it.name}（${parts.join(' ') }）` : it.name;
               };
 
-              const slotSelect = (slot, label, value, setValue, slotKey) => {
-                const picked = getEquipItem(value);
+              const slotSelect = (slot, label, eidValue, setEidValue, slotKey, affixKey) => {
+                const inst = getInstanceByEid(eidValue);
+                const valueItemId = inst?.itemId ?? null;
+                const ok = !!inst?.itemId && Array.isArray(inst?.affixes) && inst.affixes.length > 0;
+                const renderAffix = (a, idx) => {
+                  const statKey = a?.stat;
+                  const val = Math.floor(Number(a?.value) || 0);
+                        const map = {
+                    hp: { icon: <Heart size={12} className="text-rose-300" />, name: 'HP' },
+                    atk: { icon: <Sword size={12} className="text-amber-300" />, name: '攻擊' },
+                    matk: { icon: <Sparkles size={12} className="text-violet-300" />, name: '魔力' },
+                    def: { icon: <Shield size={12} className="text-sky-300" />, name: '物防' },
+                    mdef: { icon: <Sparkles size={12} className="text-indigo-300" />, name: '魔抗' },
+                    spd: { icon: <Wind size={12} className="text-emerald-300" />, name: '速度' },
+                          critRateAdd: { icon: <Sparkles size={12} className="text-cyan-300" />, name: '爆擊率' },
+                          critDmgMul: { icon: <Sparkles size={12} className="text-fuchsia-300" />, name: '爆傷' },
+                          skillDmgMul: { icon: <Sparkles size={12} className="text-amber-200" />, name: '技能傷' },
+                          incomingDmgMul: { icon: <Shield size={12} className="text-emerald-200" />, name: '減傷' },
+                          ccHitAdd: { icon: <Sparkles size={12} className="text-sky-200" />, name: '控制命中' },
+                          ailResistAdd: { icon: <Shield size={12} className="text-violet-200" />, name: '異常抗性' },
+                  };
+                  const meta = map[statKey] ?? { icon: null, name: String(statKey || '—') };
+                  return (
+                    <span key={`${statKey}-${idx}`} className="inline-flex items-center gap-1 text-[10px] font-black text-slate-200 tabular-nums">
+                      {meta.icon}
+                      {meta.name}+{val}
+                    </span>
+                  );
+                };
                 return (
                 <div className="rounded-2xl border border-white/10 bg-black/30 p-3">
                   <p className="text-[9px] font-black text-slate-400">{label}</p>
                   <select
-                    value={value ?? ''}
-                    onChange={(e) => setValue(e.target.value || null)}
+                    value={eidValue ?? ''}
+                    onChange={(e) => setEidValue(e.target.value || null)}
                     className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-[11px] font-black text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500/30"
                   >
                     <option value="">（不裝備）</option>
-                    {listEquipBySlot(slot)
-                      .filter((it) => getEquipInvCount(equipInv, it.id) > 0 || value === it.id)
-                      .map((it) => {
-                        const ok = canEquipItem(it.id, hero.id, slotKey);
-                        const owned = getEquipInvCount(equipInv, it.id);
-                        const used = countEquippedItem(it.id) - (value === it.id ? 1 : 0);
-                        const suffix = ok ? '' : `（已裝備滿 ${used}/${owned}）`;
+                    {(equipInstances ?? [])
+                      .filter((x) => getEquipItem(x.itemId)?.slot === slot)
+                      .filter((x) => canEquipEid(x.eid, hero.id) || x.eid === eidValue)
+                      .map((x) => {
+                        const it = getEquipItem(x.itemId);
+                        if (!it) return null;
+                        const suffix = equippedEidOwner?.[x.eid] && equippedEidOwner?.[x.eid] !== hero.id ? '（已被他人裝備）' : '';
+                        const fxBits = (x.affixes ?? [])
+                          .slice(0, 2)
+                          .map((a) => `${String(a.stat).toUpperCase()}+${a.value}`)
+                          .join(' ');
+                        const fxLine = fxBits ? `｜${fxBits}${(x.affixes?.length ?? 0) > 2 ? '…' : ''}` : '';
                         return (
-                          <option key={it.id} value={it.id} disabled={!ok}>
-                            {optionLabel(it)}
-                            {suffix}
+                          <option key={x.eid} value={x.eid}>
+                            {it.name}{fxLine}{suffix}
                           </option>
                         );
-                      })}
+                      }).filter(Boolean)}
                   </select>
-                  <div className="mt-2">{renderStatIcons(picked?.stats)}</div>
+                  <div className="mt-2">{renderStatIcons(getEquipItem(valueItemId)?.stats)}</div>
+                  <div className="mt-2">
+                    <p className="text-[9px] font-black text-slate-500">詞條</p>
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      {ok ? inst.affixes.map(renderAffix) : <span className="text-[10px] font-bold text-slate-600">（無）</span>}
+                    </div>
+                  </div>
                 </div>
                 );
               };
@@ -6022,30 +8047,41 @@ export default function App() {
                     {slotSelect(
                       EQUIP_SLOTS.weapon,
                       '武器',
-                      equip.weaponId,
-                      (v) => setEquipForHero(hero.id, { ...equip, weaponId: v }),
-                      'weaponId'
+                      equip2.weaponEid,
+                      (v) => setEquipForHeroV2(hero.id, { weaponEid: v }),
+                      'weaponId',
+                      'weapon'
                     )}
                     {slotSelect(
                       EQUIP_SLOTS.offhand,
                       '副手',
-                      equip.offhandId,
-                      (v) => setEquipForHero(hero.id, { ...equip, offhandId: v }),
-                      'offhandId'
+                      equip2.offhandEid,
+                      (v) => setEquipForHeroV2(hero.id, { offhandEid: v }),
+                      'offhandId',
+                      'offhand'
                     )}
                     {slotSelect(
                       EQUIP_SLOTS.armor,
                       '防具',
-                      equip.armorId,
-                      (v) => setEquipForHero(hero.id, { ...equip, armorId: v }),
-                      'armorId'
+                      equip2.armorEid,
+                      (v) => setEquipForHeroV2(hero.id, { armorEid: v }),
+                      'armorId',
+                      'armor'
                     )}
+                  </div>
+
+                  <div className="mt-4 rounded-2xl border border-white/10 bg-black/30 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[9px] font-black text-slate-400">鍛造鋪</p>
+                      <span className="text-[9px] font-black text-violet-200/90 tabular-nums">Lv.{getForgeLevelFromInventory(itemInv)}</span>
+                    </div>
+                    <p className="text-[9px] font-bold text-slate-500 mt-1">提示：詞條會依鍛造鋪等級生成，可在「鍛造所」重抽或指定。</p>
                   </div>
 
                   <div className="mt-4 flex justify-between">
                     <button
                       type="button"
-                      onClick={() => setEquipForHero(hero.id, defaultEquip())}
+                      onClick={() => setEquipForHeroV2(hero.id, { weaponEid: null, offhandEid: null, armorEid: null })}
                       className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl font-black text-[11px] text-slate-200 border border-white/10"
                     >
                       全部卸下
@@ -6069,7 +8105,7 @@ export default function App() {
             {(() => {
               const heroBase = HEROES_BASE.find((h) => h.id === heroInfo.heroId);
               if (!heroBase) return null;
-              const equip = equipForHero(heroBase.id);
+              const equip = equipItemIdsForHero(heroBase.id);
               const bonus = getEquipStatBonus(equip);
               const eqSum = getEquipSummary(equip);
               const xpMap = loadHeroXpMap();
@@ -6135,6 +8171,25 @@ export default function App() {
                       <HeroAvatar src={heroBase.avatar} name={heroBase.name} accentClassName={heroBase.color} size="lg" />
                       <div className="min-w-0">
                         {heroBase.title ? <p className="text-[10px] font-black text-slate-200">「{heroBase.title}」</p> : null}
+                        <p className="text-[9px] font-black mt-1">
+                          {(() => {
+                            const t = heroBase.type;
+                            const map = {
+                              fire: { name: '火', cls: 'text-red-300' },
+                              wind: { name: '風', cls: 'text-emerald-300' },
+                              water: { name: '水', cls: 'text-sky-300' },
+                              dark: { name: '暗', cls: 'text-violet-300' },
+                              light: { name: '光', cls: 'text-amber-200' },
+                            };
+                            const it = map[t] ?? { name: String(t || '—'), cls: 'text-slate-400' };
+                            return (
+                              <span className="inline-flex items-center gap-2">
+                                <span className="text-slate-600">屬性</span>
+                                <span className={it.cls}>{it.name}</span>
+                              </span>
+                            );
+                          })()}
+                        </p>
                         <p className="text-[9px] font-bold text-slate-500 mt-1">
                           武器：{eqSum.weapon} · 副手：{eqSum.offhand} · 防具：{eqSum.armor}
                         </p>
@@ -6345,10 +8400,27 @@ export default function App() {
                             <li key={s.id} className="rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2">
                               <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0">
-                                  <p className="text-[11px] font-black text-white truncate">{s.name}</p>
-                                  <p className="text-[10px] font-bold text-slate-300 mt-1 leading-snug">{describeSkillEffect(s)}</p>
+                                  {(() => {
+                                    const uses = skillMasteryMap?.[heroBase.id]?.[s.id]?.uses ?? 0;
+                                    const rank = getMasteryRank(uses);
+                                    const mul = getSkillPowerMulFromMastery(skillMasteryMap, heroBase.id, s.id);
+                                    const pct = Math.round((mul - 1) * 100);
+                                    return (
+                                      <>
+                                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                          <p className="text-[11px] font-black text-white truncate">{s.name}</p>
+                                          <span className="text-[10px] font-black text-slate-400 tabular-nums shrink-0">Lv.{rank}/10</span>
+                                        </div>
+                                        <div className="mt-1 text-[10px] font-bold text-slate-300 leading-snug flex flex-wrap items-center gap-x-2 gap-y-1">
+                                          <span>{describeSkillEffect(s, { masteryPct: pct })}</span>
+                                        </div>
+                                      </>
+                                    );
+                                  })()}
                                 </div>
-                                <span className="text-[10px] font-black text-cyan-300 tabular-nums shrink-0">MP {s.mpCost}</span>
+                                <span className="text-[10px] font-black text-cyan-300 tabular-nums shrink-0">
+                                  MP {Math.max(1, (s.mpCost ?? 0) - getSkillMpDiscountFromMastery(skillMasteryMap, heroBase.id, s.id))}
+                                </span>
                               </div>
                             </li>
                           ))}
@@ -6356,6 +8428,48 @@ export default function App() {
                       ) : (
                         <p className="text-[11px] font-bold text-slate-500 mt-1">（無）</p>
                       )}
+                    </div>
+
+                    <div className="rounded-2xl border border-white/10 bg-black/30 p-3">
+                      <p className="text-[9px] font-black text-slate-400">合體技</p>
+                      {(() => {
+                        const combos = (COMBO_SKILL_DEFS ?? []).filter((d) => d && (d.a === heroBase.id || d.b === heroBase.id));
+                        if (!combos.length) return <p className="text-[11px] font-bold text-slate-500 mt-1">（無）</p>;
+                        return (
+                          <ul className="mt-2 space-y-2">
+                            {combos.map((d) => {
+                              const partnerId = d.a === heroBase.id ? d.b : d.a;
+                              const partnerName = HEROES_BASE.find((h) => h.id === partnerId)?.name ?? partnerId;
+                              const pts = getBondPoints(bondMap, heroBase.id, partnerId);
+                              const lv = getBondLevel(pts);
+                              const need = Math.max(1, Math.floor(Number(d.requiredBondLv) || 2));
+                              const ok = lv >= need;
+                              const skillName = d.skill?.name ?? '（尚未實裝技能）';
+                              return (
+                                <li key={d.id} className="rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <p className="text-[11px] font-black text-white truncate">
+                                        與 {partnerName}：{skillName}
+                                      </p>
+                                      <p className="text-[10px] font-bold text-slate-300 mt-1 leading-snug">
+                                        解鎖：羈絆 Lv.{need}（目前 Lv.{lv}）
+                                      </p>
+                                      <p className="text-[10px] font-bold text-slate-300 mt-1 leading-snug">
+                                        {d.skill ? `效果：${describeSkillEffect(d.skill)}` : '效果：尚未實裝（之後可補技能資料）'}
+                                      </p>
+                                      <p className="text-[9px] font-black text-slate-500 mt-1">代價：施放者與夥伴皆進入硬直（行動延後）。</p>
+                                    </div>
+                                    <span className={`text-[10px] font-black shrink-0 ${ok ? 'text-emerald-300' : 'text-slate-500'}`}>
+                                      {ok ? '可用' : '未解鎖'}
+                                    </span>
+                                  </div>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        );
+                      })()}
                     </div>
                   </div>
 
@@ -6505,15 +8619,55 @@ export default function App() {
             role="presentation"
           >
             <div
-              className={`w-full rounded-2xl border border-white/15 bg-slate-950 p-5 shadow-2xl ${lobbyPanelModal === 'recruit' ? 'max-w-lg' : 'max-w-sm'}`}
+              className={`w-full rounded-2xl border border-white/15 bg-slate-950 p-5 shadow-2xl ${
+                lobbyPanelModal === 'recruit'
+                  ? 'max-w-lg'
+                  : lobbyPanelModal === 'garden' || lobbyPanelModal === 'lobbyBg'
+                    ? 'max-w-md'
+                    : 'max-w-sm'
+              }`}
               onClick={(e) => e.stopPropagation()}
               role="dialog"
               aria-modal="true"
-              aria-label={lobbyPanelModal === 'daily' ? '每日任務' : lobbyPanelModal === 'achievements' ? '成就' : '星曉祈願'}
+              aria-label={
+                lobbyPanelModal === 'daily'
+                  ? '每日任務'
+                  : lobbyPanelModal === 'achievements'
+                    ? '成就'
+                    : lobbyPanelModal === 'recruit'
+                      ? '星曉祈願'
+                      : lobbyPanelModal === 'forge'
+                        ? '鍛造所'
+                        : lobbyPanelModal === 'training'
+                          ? '訓練場'
+                          : lobbyPanelModal === 'camp'
+                            ? '餐酒館'
+                            : lobbyPanelModal === 'garden'
+                              ? '休憩園'
+                              : lobbyPanelModal === 'lobbyBg'
+                                ? '大廳背景'
+                                : '面板'
+              }
             >
               <div className="flex items-start justify-between gap-2">
                 <h3 className="text-sm font-black text-white">
-                  {lobbyPanelModal === 'daily' ? '每日任務' : lobbyPanelModal === 'achievements' ? '成就' : '星曉祈願'}
+                  {lobbyPanelModal === 'daily'
+                    ? '每日任務'
+                    : lobbyPanelModal === 'achievements'
+                      ? '成就'
+                      : lobbyPanelModal === 'recruit'
+                        ? '星曉祈願'
+                        : lobbyPanelModal === 'forge'
+                          ? '鍛造所'
+                          : lobbyPanelModal === 'training'
+                            ? '訓練場'
+                            : lobbyPanelModal === 'camp'
+                              ? '餐酒館'
+                              : lobbyPanelModal === 'garden'
+                                ? '休憩園'
+                                : lobbyPanelModal === 'lobbyBg'
+                                  ? '大廳背景'
+                                  : '面板'}
                 </h3>
                 <button
                   type="button"
@@ -6525,12 +8679,44 @@ export default function App() {
                 </button>
               </div>
               {lobbyPanelModal === 'recruit' ? (
-                <div className="mt-3 space-y-4 max-h-[min(70vh,28rem)] overflow-y-auto no-scrollbar">
+                <div className="mt-3 flex min-h-0 max-h-[min(78vh,32rem)] flex-col gap-2">
+                  <div className="flex shrink-0 gap-1 rounded-xl border border-white/10 bg-slate-900/60 p-0.5" role="tablist" aria-label="星曉祈願分頁">
+                    {[
+                      { id: 'limited', label: '星曉限定池1' },
+                      { id: 'soon1', label: '星曉限定池2' },
+                      { id: 'soon2', label: '星曉限定池3' },
+                    ].map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={recruitWishTab === t.id}
+                        onClick={() => setRecruitWishTab(t.id)}
+                        className={`min-w-0 flex-1 rounded-lg px-2 py-2 text-[10px] font-black transition-colors ${
+                          recruitWishTab === t.id
+                            ? 'border border-cyan-500/40 bg-cyan-600/40 text-cyan-100'
+                            : 'border border-transparent text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                        }`}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                  {recruitWishTab === 'limited' ? (
+                <div className="relative min-h-0 flex-1 space-y-4 overflow-y-auto pr-0.5 no-scrollbar">
                   <p className="text-[11px] font-bold text-slate-400 leading-relaxed">
-                    限定池：邂逅率 <span className="text-cyan-300 font-black">5%</span>（僅剩未擁有角色時有效），其餘為<span className="text-amber-200/90 font-black">金幣</span>。
-                    每抽消耗 <span className="text-cyan-300 font-black">{STAR_WISH_PULL_COST}</span> 星曉晶石；每次抽獎未邂逅角色時，直購價
-                    <span className="text-amber-200/90 font-black"> -40</span>（最低 300），取得角色或直購後重置。
+                    限定池：邂逅率 <span className="text-cyan-300 font-black">5%</span>（僅當尚餘未擁有之限定角時生效），其餘為
+                    <span className="text-amber-200/90 font-black"> 金幣、天賦碎晶、抵用券／鍛造幣／訓練書、經驗關卡入場券等</span>。
+                    每抽 <span className="text-cyan-300 font-black">{STAR_WISH_PULL_COST}</span> 星曉晶石；未邂逅到角時，直購價
+                    <span className="text-amber-200/90 font-black"> -40</span>（最低 300），取得角色或直購後重置。限定角齊全後仍可持續星曉祈願以取得碎晶等獎勵。
                   </p>
+                  <button
+                    type="button"
+                    onClick={() => setStarWishOddsOpen(true)}
+                    className="w-full py-2 rounded-xl border border-cyan-500/30 bg-cyan-950/30 hover:bg-cyan-950/45 text-[12px] font-black text-cyan-100"
+                  >
+                    檢視完整機率表
+                  </button>
                   <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-[11px] font-bold text-slate-300">
                     <span className="text-slate-500">持有星曉晶石：</span>
                     <span className="tabular-nums text-cyan-200">{starCrystals}</span>
@@ -6573,6 +8759,17 @@ export default function App() {
                         >
                           <span className="text-[34px] font-black text-violet-200 drop-shadow-md">✦</span>
                         </div>
+                      ) : starWishRewardPreview?.type === 'item' ? (
+                        <div
+                          className="flex h-[7.25rem] w-[7.25rem] shrink-0 flex-col items-center justify-center gap-1 rounded-2xl border border-emerald-400/35 bg-gradient-to-br from-emerald-500/15 via-slate-950/60 to-cyan-900/20 shadow-[0_0_14px_rgba(52,211,153,0.16)] px-1"
+                          aria-hidden
+                        >
+                          <Backpack size={40} className="text-emerald-200" strokeWidth={2.25} />
+                          <span className="text-[9px] font-black text-emerald-100/90 text-center leading-tight line-clamp-2">
+                            {getItem(starWishRewardPreview.itemId)?.name ?? '道具'}
+                            {starWishRewardPreview.amount > 1 ? ` ×${starWishRewardPreview.amount}` : ''}
+                          </span>
+                        </div>
                       ) : null}
                       <p className="text-[11px] font-bold text-amber-100/95 leading-snug min-w-0 flex-1">{starWishLastMsg}</p>
                     </div>
@@ -6603,13 +8800,15 @@ export default function App() {
                     <button
                       type="button"
                       onClick={runStarWishPull}
-                      disabled={remainingWishHeroIds.length === 0 || starCrystals < STAR_WISH_PULL_COST}
+                      disabled={starCrystals < STAR_WISH_PULL_COST}
                       className="w-full py-2.5 rounded-xl bg-cyan-700 hover:bg-cyan-600 disabled:opacity-45 disabled:pointer-events-none text-sm font-black text-white border border-cyan-500/30"
                     >
-                      祈願一次（{STAR_WISH_PULL_COST} 星曉晶石）
+                      星曉祈願一次（{STAR_WISH_PULL_COST} 星曉晶石）
                     </button>
                     {remainingWishHeroIds.length === 0 ? (
-                      <p className="text-[10px] font-bold text-slate-500 text-center">本期四位皆已加入。</p>
+                      <p className="text-[10px] font-bold text-center text-emerald-300/95 leading-snug">
+                        本期四位限定角已齊，仍可持續星曉祈願以取得天賦碎晶與其餘獎勵。
+                      </p>
                     ) : (
                       <div className="space-y-2">
                         <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">直購自選（未擁有者）</p>
@@ -6641,17 +8840,878 @@ export default function App() {
                   >
                     關閉
                   </button>
+                  {starWishOddsOpen ? (
+                    <div
+                      className="absolute inset-0 z-[25] flex items-center justify-center rounded-2xl bg-black/75 p-2 backdrop-blur-sm"
+                      onClick={() => setStarWishOddsOpen(false)}
+                      role="presentation"
+                    >
+                      <div
+                        className="max-h-[min(72vh,26rem)] w-full max-w-md overflow-y-auto no-scrollbar rounded-xl border border-cyan-500/25 bg-slate-950/98 p-3 shadow-2xl"
+                        onClick={(e) => e.stopPropagation()}
+                        role="dialog"
+                        aria-label="星曉祈願 機率表"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-[12px] font-black text-white">星曉限定 機率表</p>
+                          <button
+                            type="button"
+                            onClick={() => setStarWishOddsOpen(false)}
+                            className="h-7 w-7 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-sm font-black shrink-0"
+                            aria-label="關閉機率表"
+                          >
+                            ×
+                          </button>
+                        </div>
+                        {(() => {
+                          const nWish = remainingWishHeroIds.length;
+                          const pMeet = 100 * STAR_WISH_CHAR_RATE;
+                          const pEach = nWish > 0 ? pMeet / nWish : 0;
+                          const jMul = nWish > 0 ? 1 - STAR_WISH_CHAR_RATE : 1;
+                          const sumW = STAR_WISH_JUNK_WEIGHT_SUM;
+                          return (
+                            <div className="mt-2 space-y-3 text-[10px] font-bold text-slate-300">
+                              <div className="rounded-lg border border-white/10 bg-black/30 p-2.5">
+                                <p className="text-[9px] font-black uppercase tracking-wider text-cyan-400/90">星曉限定·角色</p>
+                                {nWish === 0 ? (
+                                  <p className="mt-1.5 text-slate-400 font-bold">尚餘 0 位可邂逅：不會再觸發邂逅，本池雜物權重佔當次星曉祈願 100%。</p>
+                                ) : (
+                                  <>
+                                    <p className="mt-1.5 leading-relaxed text-slate-200">
+                                      當次星曉祈願先判定是否邂逅：總機率 <span className="text-cyan-300 font-black">{pMeet.toFixed(0)}%</span>（
+                                      {nWish} 人未擁有時，命中後在該 {nWish} 人中均分）。
+                                    </p>
+                                    <ul className="mt-2 space-y-1 text-slate-200">
+                                      {STAR_WISH_HERO_ORDER.map(({ id, name }) => {
+                                        const inPool = remainingWishHeroIds.includes(id);
+                                        return (
+                                          <li key={id} className="flex justify-between gap-2">
+                                            <span className="min-w-0 truncate">{name}</span>
+                                            <span className="shrink-0 font-black text-cyan-200/90 tabular-nums">
+                                              {inPool ? `${pEach.toFixed(2)}%` : '0%（已取得）'}
+                                            </span>
+                                          </li>
+                                        );
+                                      })}
+                                    </ul>
+                                    <p className="mt-2 text-slate-500">
+                                      其餘 <span className="text-amber-200/90 font-black">{(100 - pMeet).toFixed(0)}%</span> 進入下表雜物池；未邂逅到角時，直購價 -40 累積至下次直購成功。
+                                    </p>
+                                  </>
+                                )}
+                              </div>
+                              <div className="rounded-lg border border-white/10 bg-black/30 p-2.5">
+                                <p className="text-[9px] font-black uppercase tracking-wider text-amber-400/90">雜物池（觸發「非角色」或角色已齊全）</p>
+                                <p className="mt-1.5 text-slate-500 text-[9px] font-bold">
+                                  權重總和 {sumW}。下列「佔當次星曉祈願」= 雜物佔比 ×（{jMul === 1 ? '100%（全池）' : `約 ${(jMul * 100).toFixed(0)}%（前段未中 ${pMeet.toFixed(0)}% 邂逅）`}）。
+                                </p>
+                                <table className="mt-2 w-full border-collapse text-left">
+                                  <thead>
+                                    <tr className="text-slate-500 text-[9px] font-black">
+                                      <th className="py-0.5 pr-1">獎勵</th>
+                                      <th className="py-0.5 pr-1">權重</th>
+                                      <th className="py-0.5 pr-1">佔雜物</th>
+                                      <th className="py-0.5">佔當次星曉祈願</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {STAR_WISH_JUNK_TABLE.map((row, idx) => {
+                                      const w = row.w;
+                                      const pSub = (w / sumW) * 100;
+                                      const pAll = jMul * (w / sumW) * 100;
+                                      return (
+                                        <tr key={`${row.kind}-${row.amount}-${'itemId' in row ? row.itemId : ''}-${idx}`} className="border-t border-white/5 text-slate-200">
+                                          <td className="py-1 pr-1">{getStarWishJunkRowLabel(row)}</td>
+                                          <td className="py-1 pr-1 font-black text-slate-300 tabular-nums">{w}</td>
+                                          <td className="py-1 pr-1 text-slate-300 tabular-nums">{pSub.toFixed(1)}%</td>
+                                          <td className="py-1 font-black text-amber-200/90 tabular-nums">{pAll.toFixed(2)}%</td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                        <button
+                          type="button"
+                          onClick={() => setStarWishOddsOpen(false)}
+                          className="mt-3 w-full py-2 rounded-lg border border-white/10 bg-slate-800/80 hover:bg-slate-700/80 text-[11px] font-black text-slate-200"
+                        >
+                          關閉
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+                  ) : (
+                    <div className="flex min-h-[14rem] flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-white/10 bg-slate-900/35 px-4 py-8 text-center">
+                      <p className="text-sm font-black uppercase tracking-widest text-slate-500">Coming soon</p>
+                      <p className="text-[11px] font-bold text-slate-500">內容規劃中，敬請期待</p>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <>
-                  <p className="text-[12px] text-slate-400 mt-3 leading-relaxed">此功能尚在規劃中，之後會接上任務條件、進度與獎勵結算。</p>
-                  <button
-                    type="button"
-                    onClick={() => setLobbyPanelModal(null)}
-                    className="mt-5 w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-black text-white"
-                  >
-                    知道了
-                  </button>
+                  {lobbyPanelModal === 'forge' ? renderFacilityNpcHeader('forge') : null}
+                  {lobbyPanelModal === 'training' ? renderFacilityNpcHeader('training') : null}
+                  {lobbyPanelModal === 'camp' ? renderFacilityNpcHeader('camp') : null}
+                  {lobbyPanelModal === 'garden' ? renderFacilityNpcHeader('garden') : null}
+                  {lobbyPanelModal === 'daily' ? (
+                    (() => {
+                      const s = dailyQ ?? loadDailyQuestsState();
+                      const picked = Array.isArray(s.picked) ? s.picked : [];
+                      const rewardEach = 5;
+                      const bonus = 15;
+                      const isDone = (qid) => {
+                        const def = DAILY_QUEST_DEFS[qid];
+                        const p = Number(s.prog?.[qid] ?? 0);
+                        return p >= (def?.target ?? 0);
+                      };
+                      const canClaim = (qid) => isDone(qid) && !s.claimed?.[qid];
+                      const allClaimed = picked.length === 3 && picked.every((qid) => !!s.claimed?.[qid]);
+                      const canBonus = allClaimed && !s.bonusClaimed;
+
+                      const claimQuest = (qid) => {
+                        if (!canClaim(qid)) return;
+                        setDailyQ((prev) => ({ ...prev, claimed: { ...(prev.claimed ?? {}), [qid]: true } }));
+                        setStarCrystals((c) => c + rewardEach);
+                        unlockAudio();
+                        SFX.levelUp();
+                      };
+                      const claimBonus = () => {
+                        if (!canBonus) return;
+                        setDailyQ((prev) => ({ ...prev, bonusClaimed: true }));
+                        setStarCrystals((c) => c + bonus);
+                        unlockAudio();
+                        SFX.levelUp();
+                      };
+
+                      return (
+                        <div className="mt-3 space-y-3">
+                          <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-[11px] font-bold text-slate-300">
+                            <span className="text-slate-500">完成獎勵：</span>
+                            <span className="text-cyan-200 font-black">每項 +{rewardEach} 星曉晶石</span>
+                            <span className="text-slate-600 mx-2">|</span>
+                            <span className="text-slate-500">全清加成：</span>
+                            <span className="text-amber-200 font-black">+{bonus} 星曉晶石</span>
+                          </div>
+
+                          <div className="space-y-2">
+                            {picked.map((qid) => {
+                              const def = DAILY_QUEST_DEFS[qid];
+                              const p = Math.max(0, Number(s.prog?.[qid] ?? 0));
+                              const t = def?.target ?? 1;
+                              const done = p >= t;
+                              const claimed = !!s.claimed?.[qid];
+                              const pct = Math.max(0, Math.min(100, Math.floor((Math.min(p, t) / t) * 100)));
+                              return (
+                                <div key={qid} className="rounded-xl border border-white/10 bg-slate-900/40 p-3">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <p className="text-[11px] font-black text-white">{def?.title ?? qid}</p>
+                                      <p className="text-[10px] font-bold text-slate-400 mt-0.5">
+                                        {def?.desc ?? ''} {t}
+                                        {def?.unit ?? ''}
+                                      </p>
+                                    </div>
+                                    {claimed ? (
+                                      <span className="text-[10px] font-black text-emerald-300">已領取</span>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        disabled={!canClaim(qid)}
+                                        onClick={() => claimQuest(qid)}
+                                        className="px-3 py-1.5 rounded-lg text-[10px] font-black border border-cyan-400/25 bg-cyan-700/30 hover:bg-cyan-700/45 disabled:opacity-45 disabled:pointer-events-none text-cyan-100"
+                                      >
+                                        領取 +{rewardEach}
+                                      </button>
+                                    )}
+                                  </div>
+                                  <div className="mt-2 flex items-center justify-between text-[10px] font-black text-slate-300 tabular-nums">
+                                    <span className={done ? 'text-emerald-300' : 'text-slate-400'}>
+                                      {Math.min(p, t)}/{t}
+                                      {def?.unit ?? ''}
+                                    </span>
+                                    <span className="text-slate-500">{done ? '完成' : `${pct}%`}</span>
+                                  </div>
+                                  <div className="mt-1.5 h-2 rounded-full bg-black/40 border border-white/10 overflow-hidden">
+                                    <div className={`h-full ${done ? 'bg-emerald-500' : 'bg-sky-500'}`} style={{ width: `${pct}%` }} />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          <div className="rounded-xl border border-amber-500/20 bg-amber-950/20 p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <div>
+                                <p className="text-[11px] font-black text-amber-100">全清加成</p>
+                                <p className="text-[10px] font-bold text-amber-200/70 mt-0.5">三項任務皆領取後可領取。</p>
+                              </div>
+                              <button
+                                type="button"
+                                disabled={!canBonus}
+                                onClick={claimBonus}
+                                className="px-3.5 py-1.5 rounded-lg text-[10px] font-black border border-amber-400/25 bg-amber-700/20 hover:bg-amber-700/30 disabled:opacity-45 disabled:pointer-events-none text-amber-100"
+                              >
+                                領取 +{bonus}
+                              </button>
+                            </div>
+                            <p className="text-[10px] font-black text-slate-400 mt-2">
+                              狀態：{allClaimed ? (s.bonusClaimed ? <span className="text-emerald-300">已領取</span> : <span className="text-amber-200">可領取</span>) : <span>未達成</span>}
+                            </p>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setLobbyPanelModal(null)}
+                            className="w-full py-2 rounded-xl border border-white/10 bg-slate-900/50 hover:bg-slate-800 text-xs font-black text-slate-200"
+                          >
+                            關閉
+                          </button>
+                        </div>
+                      );
+                    })()
+                  ) : lobbyPanelModal === 'achievements' ? (
+                    <>
+                      <p className="text-[12px] text-slate-400 mt-3 leading-relaxed">此功能尚在規劃中，之後會接上成就條件、進度與獎勵結算。</p>
+                      <button
+                        type="button"
+                        onClick={() => setLobbyPanelModal(null)}
+                        className="mt-5 w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-black text-white"
+                      >
+                        知道了
+                      </button>
+                    </>
+                  ) : lobbyPanelModal === 'lobbyBg' ? (
+                    <div className="mt-3 space-y-3">
+                      <p className="text-[11px] font-bold text-slate-400 leading-relaxed">
+                        將圖檔置於 <span className="text-slate-200 font-mono text-[10px]">public/lobby/</span>，檔名見各卡片下方。未放圖時會顯示主題色漸層。
+                      </p>
+                      <div className="grid grid-cols-2 gap-2 max-h-[min(60vh,22rem)] overflow-y-auto pr-0.5 no-scrollbar">
+                        {LOBBY_BACKGROUNDS.map((b) => {
+                          const selected = b.id === lobbyBgId;
+                          return (
+                            <button
+                              key={b.id}
+                              type="button"
+                              onClick={() => {
+                                setLobbyBgId(b.id);
+                                saveLobbyBgId(b.id);
+                                setLobbyPanelModal(null);
+                              }}
+                              className={`rounded-xl border p-2 text-left transition-all active:scale-[0.99] ${
+                                selected
+                                  ? 'border-violet-400/60 bg-violet-950/40 ring-1 ring-violet-400/35'
+                                  : 'border-white/10 bg-slate-900/50 hover:bg-slate-800/70'
+                              }`}
+                            >
+                              <div
+                                className="relative h-14 w-full overflow-hidden rounded-lg border border-white/10"
+                                style={{
+                                  backgroundImage: `url('${b.image}'), ${b.fallback}`,
+                                  backgroundSize: 'cover, cover',
+                                  backgroundPosition: 'center, center',
+                                  backgroundRepeat: 'no-repeat, no-repeat',
+                                }}
+                                aria-hidden
+                              />
+                              <p className="mt-1.5 text-[11px] font-black text-white leading-tight">{b.name}</p>
+                              <p className="mt-0.5 text-[9px] font-mono text-slate-500 truncate" title={b.image}>
+                                {b.image.replace(/^lobby\//, '')}
+                              </p>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setLobbyPanelModal(null)}
+                        className="w-full py-2 rounded-xl border border-white/10 bg-slate-900/50 hover:bg-slate-800 text-xs font-black text-slate-200"
+                      >
+                        關閉
+                      </button>
+                    </div>
+                  ) : lobbyPanelModal === 'forge' ? (
+                    (() => {
+                      const heroIds = (partyIds ?? []).filter((id) => id && isHeroUnlocked(id));
+                      const heroId = forgePick.heroId ?? heroIds[0] ?? null;
+                      const hero = HEROES_BASE.find((h) => h.id === heroId);
+                      const eq2 = heroId ? equipForHeroV2(heroId) : null;
+                      const slotKey = forgePick.slotKey ?? 'weapon';
+                      const eid = slotKey === 'weapon' ? eq2?.weaponEid : slotKey === 'offhand' ? eq2?.offhandEid : eq2?.armorEid;
+                      const inst = eid ? getInstanceByEid(eid) : null;
+                      const itemId = inst?.itemId ?? null;
+                      const forgeLevel = getForgeLevelFromInventory(itemInv);
+                      const curAffixes = Array.isArray(inst?.affixes) ? inst.affixes : [];
+                      const salt = Math.max(0, Math.floor(Number(inst?.salt) || 0));
+                      const can = !!heroId && !!eid && !!itemId;
+
+                      const statOptsAll = [
+                        { id: null, label: '（不指定）' },
+                        { id: 'hp', label: 'HP' },
+                        { id: 'atk', label: '攻擊' },
+                        { id: 'matk', label: '魔力' },
+                        { id: 'def', label: '物防' },
+                        { id: 'mdef', label: '魔抗' },
+                        { id: 'spd', label: '速度' },
+                        { id: 'critRateAdd', label: '爆擊率' },
+                        { id: 'critDmgMul', label: '爆擊傷害' },
+                        { id: 'skillDmgMul', label: '技能傷害' },
+                        { id: 'incomingDmgMul', label: '減傷' },
+                        { id: 'ccHitAdd', label: '控制命中' },
+                        { id: 'ailResistAdd', label: '異常抗性' },
+                      ];
+                      const statOpts =
+                        slotKey === 'weapon'
+                          ? statOptsAll.filter((o) => [null, 'atk', 'matk', 'critDmgMul', 'skillDmgMul'].includes(o.id))
+                          : slotKey === 'offhand'
+                            ? statOptsAll.filter((o) => [null, 'spd', 'critRateAdd', 'incomingDmgMul', 'ccHitAdd'].includes(o.id))
+                            : statOptsAll.filter((o) => [null, 'hp', 'def', 'mdef', 'ailResistAdd'].includes(o.id));
+
+                      const costReroll = 120;
+                      const costForce = 220;
+                      const cTok = getInvCount(itemInv, 'it_forge_token');
+                      const cTokF = getInvCount(itemInv, 'it_forge_token_force');
+                      const canPayReroll = cTok > 0 || gold >= costReroll;
+                      const canPayForce = cTokF > 0 || gold >= costForce;
+
+                      const doReroll = (forcedStat = null) => {
+                        if (!can) return;
+                        const cost = forcedStat ? costForce : costReroll;
+                        if (forcedStat) {
+                          if (cTokF > 0) setItemInv((inv) => incInv(inv, 'it_forge_token_force', -1));
+                          else if (gold < cost) return;
+                          else setGold((g) => g - cost);
+                        } else if (cTok > 0) {
+                          setItemInv((inv) => incInv(inv, 'it_forge_token', -1));
+                        } else if (gold < cost) {
+                          return;
+                        } else {
+                          setGold((g) => g - cost);
+                        }
+                        const nextSalt = salt + 1;
+                        const affixes = rollAffixesForEquip({ heroId, slotKey, itemId, forgeLevel, salt: nextSalt, forcedStat });
+                        setEquipInstances((list) =>
+                          Array.isArray(list) ? list.map((x) => (x.eid === eid ? { ...x, affixes, salt: nextSalt } : x)) : []
+                        );
+                        unlockAudio();
+                        SFX.skill();
+                        bumpDailyQuest('forge_reroll', 1);
+                      };
+
+                      return (
+                        <div className="mt-3 space-y-3">
+                          <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-[11px] font-bold text-slate-300">
+                            <span className="text-slate-500">持有金幣：</span>
+                            <span className="tabular-nums text-amber-200">{gold}</span>
+                            <span className="text-slate-600 mx-2">|</span>
+                            <span className="text-slate-500">鍛造 Lv.</span>
+                            <span className="tabular-nums text-violet-200">{forgeLevel}</span>
+                            <div className="mt-1.5 text-[10px] font-bold text-slate-500">
+                              普通鍛造幣 ×<span className="text-amber-200/90 tabular-nums">{cTok}</span>
+                              <span className="text-slate-600 mx-1.5">|</span>
+                              指定鍛造幣 ×<span className="text-amber-200/90 tabular-nums">{cTokF}</span>
+                              <span className="block text-[9px] font-bold text-slate-600 mt-0.5">結帳時優先使用代幣，不足再扣金幣</span>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="rounded-xl border border-white/10 bg-slate-900/40 px-3 py-2">
+                              <p className="text-[9px] font-black text-slate-400">角色</p>
+                              <select
+                                value={heroId ?? ''}
+                                onChange={(e) => setForgePick((s) => ({ ...(s ?? {}), heroId: e.target.value || null }))}
+                                className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-[11px] font-black text-slate-100 focus:outline-none focus:ring-1 focus:ring-orange-500/30"
+                              >
+                                {heroIds.map((hid) => (
+                                  <option key={hid} value={hid}>
+                                    {HEROES_BASE.find((h) => h.id === hid)?.name ?? hid}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="rounded-xl border border-white/10 bg-slate-900/40 px-3 py-2">
+                              <p className="text-[9px] font-black text-slate-400">部位</p>
+                              <select
+                                value={slotKey}
+                                onChange={(e) => setForgePick((s) => ({ ...(s ?? {}), slotKey: e.target.value || 'weapon' }))}
+                                className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-[11px] font-black text-slate-100 focus:outline-none focus:ring-1 focus:ring-orange-500/30"
+                              >
+                                <option value="weapon">武器</option>
+                                <option value="offhand">副手</option>
+                                <option value="armor">防具</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-white/10 bg-slate-900/40 px-3 py-2">
+                            <p className="text-[10px] font-black text-slate-200">目前裝備</p>
+                            <p className="text-[10px] font-bold text-slate-400 mt-1">
+                              {hero ? hero.name : '—'} · {itemId ? (getEquipItem(itemId)?.name ?? itemId) : '（未裝備）'}
+                            </p>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {curAffixes?.length ? (
+                                curAffixes.map((a, i) => (
+                                  <span key={`${a.id}-${i}`} className="text-[10px] font-black text-slate-200 tabular-nums">
+                                    {formatAffixZh(a)}
+                                  </span>
+                                ))
+                              ) : (
+                                <span className="text-[10px] font-bold text-slate-600">（尚未生成詞條）</span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-white/10 bg-slate-900/40 px-3 py-2">
+                            <p className="text-[9px] font-black text-slate-400">指定一條詞條（重抽時必含）</p>
+                            <select
+                              value={forgePick.forcedStat ?? ''}
+                              onChange={(e) => setForgePick((s) => ({ ...(s ?? {}), forcedStat: e.target.value || null }))}
+                              className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-[11px] font-black text-slate-100 focus:outline-none focus:ring-1 focus:ring-orange-500/30"
+                            >
+                              {statOpts.map((o) => (
+                                <option key={String(o.id)} value={o.id ?? ''}>
+                                  {o.label}
+                                </option>
+                              ))}
+                            </select>
+                            <p className="text-[9px] font-bold text-slate-500 mt-1">提示：指定只保證「包含該屬性」，數值仍會重新抽取。</p>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              disabled={!can || !canPayReroll}
+                              onClick={() => doReroll(null)}
+                              className="w-full py-2 rounded-xl bg-orange-700/40 hover:bg-orange-700/55 disabled:opacity-45 disabled:pointer-events-none text-[12px] font-black text-orange-100 border border-orange-400/25"
+                            >
+                              重抽詞條（{cTok > 0 ? '-1 普通鍛造幣' : `-${costReroll} 金`}）
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!can || !forgePick.forcedStat || !canPayForce}
+                              onClick={() => doReroll(forgePick.forcedStat)}
+                              className="w-full py-2 rounded-xl bg-orange-700/40 hover:bg-orange-700/55 disabled:opacity-45 disabled:pointer-events-none text-[12px] font-black text-orange-100 border border-orange-400/25"
+                            >
+                              指定重抽（{cTokF > 0 ? '-1 指定鍛造幣' : `-${costForce} 金`}）
+                            </button>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setLobbyPanelModal(null)}
+                            className="w-full py-2 rounded-xl border border-white/10 bg-slate-900/50 hover:bg-slate-800 text-xs font-black text-slate-200"
+                          >
+                            關閉
+                          </button>
+                        </div>
+                      );
+                    })()
+                  ) : lobbyPanelModal === 'training' ? (
+                    (() => {
+                      const heroIds = (partyIds ?? []).filter((id) => id && isHeroUnlocked(id));
+                      const heroId = trainingPick.heroId ?? heroIds[0] ?? null;
+                      const hero = HEROES_BASE.find((h) => h.id === heroId);
+                      const skills = heroId ? (getSkillsForHero({ id: heroId }) ?? []) : [];
+                      const skillId = trainingPick.skillId ?? skills[0]?.id ?? null;
+                      const s = skills.find((x) => x.id === skillId) ?? null;
+                      const uses = heroId && skillId ? (skillMasteryMap?.[heroId]?.[skillId]?.uses ?? 0) : 0;
+                      const rank = getMasteryRank(uses);
+                      const isMax = rank >= 10;
+                      const branch = heroId && skillId ? (skillMasteryMap?.[heroId]?.[skillId]?.branch ?? null) : null;
+                      const can = !!heroId && !!skillId;
+                      const packUses = 10;
+                      const cost = 80;
+                      const cGuide = getInvCount(itemInv, 'it_training_guide');
+                      const canPayTrain = cGuide > 0 || gold >= cost;
+
+                      const train = () => {
+                        if (!can || !canPayTrain || isMax) return;
+                        if (cGuide > 0) setItemInv((inv) => incInv(inv, 'it_training_guide', -1));
+                        else setGold((g) => g - cost);
+                        setSkillMasteryMap((prev) => incSkillUses(prev, heroId, skillId, packUses));
+                        unlockAudio();
+                        SFX.levelUp();
+                        bumpDailyQuest('training_buy', 1);
+                      };
+
+                      const setBranch = (b) => {
+                        if (!can || rank < 6) return;
+                        setSkillMasteryMap((prev) => setSkillMasteryBranch(prev, heroId, skillId, b));
+                        unlockAudio();
+                        SFX.skill();
+                      };
+
+                      return (
+                        <div className="mt-3 space-y-3">
+                          <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-[11px] font-bold text-slate-300">
+                            <span className="text-slate-500">持有金幣：</span>
+                            <span className="tabular-nums text-amber-200">{gold}</span>
+                            <span className="text-slate-600 mx-2">|</span>
+                            <span className="text-slate-500">訓練指導書</span>
+                            <span className="tabular-nums text-emerald-200/90">×{cGuide}</span>
+                            <p className="text-[9px] font-bold text-slate-600 mt-1">結帳時優先使用指導書，不足再扣金幣</p>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="rounded-xl border border-white/10 bg-slate-900/40 px-3 py-2">
+                              <p className="text-[9px] font-black text-slate-400">角色</p>
+                              <select
+                                value={heroId ?? ''}
+                                onChange={(e) => setTrainingPick((st) => ({ ...(st ?? {}), heroId: e.target.value || null, skillId: null }))}
+                                className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-[11px] font-black text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
+                              >
+                                {heroIds.map((hid) => (
+                                  <option key={hid} value={hid}>
+                                    {HEROES_BASE.find((h) => h.id === hid)?.name ?? hid}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="rounded-xl border border-white/10 bg-slate-900/40 px-3 py-2">
+                              <p className="text-[9px] font-black text-slate-400">技能</p>
+                              <select
+                                value={skillId ?? ''}
+                                onChange={(e) => setTrainingPick((st) => ({ ...(st ?? {}), skillId: e.target.value || null }))}
+                                className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-[11px] font-black text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
+                              >
+                                {skills.map((sk) => (
+                                  <option key={sk.id} value={sk.id}>
+                                    {sk.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-white/10 bg-slate-900/40 px-3 py-2">
+                            <p className="text-[10px] font-black text-slate-200">{hero ? hero.name : '—'} · {s ? s.name : '—'}</p>
+                            <p className="text-[10px] font-bold text-slate-400 mt-1 tabular-nums">
+                              熟練度 Lv.{rank}/10{isMax ? '（Max）' : ''} · 使用 {uses} 次{' '}
+                              {branch ? `· 分支：${branch === 'power' ? '威力' : '省魔'}` : ''}
+                            </p>
+
+                            <div className="mt-2 grid grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                disabled={!can || rank < 6}
+                                onClick={() => setBranch(branch === 'power' ? null : 'power')}
+                                className="w-full py-2 rounded-xl bg-violet-700/25 hover:bg-violet-700/35 disabled:opacity-45 disabled:pointer-events-none text-[12px] font-black text-violet-100 border border-violet-400/25"
+                              >
+                                分支：威力
+                              </button>
+                              <button
+                                type="button"
+                                disabled={!can || rank < 6}
+                                onClick={() => setBranch(branch === 'efficiency' ? null : 'efficiency')}
+                                className="w-full py-2 rounded-xl bg-cyan-700/20 hover:bg-cyan-700/30 disabled:opacity-45 disabled:pointer-events-none text-[12px] font-black text-cyan-100 border border-cyan-400/25"
+                              >
+                                分支：省魔
+                              </button>
+                            </div>
+
+                            <button
+                              type="button"
+                              disabled={!can || !canPayTrain || isMax}
+                              onClick={train}
+                              className="mt-2 w-full py-2 rounded-xl bg-emerald-700/35 hover:bg-emerald-700/50 disabled:opacity-45 disabled:pointer-events-none text-[12px] font-black text-emerald-100 border border-emerald-400/25"
+                            >
+                              {isMax ? '熟練度已滿（Max）' : `訓練 +${packUses} 次（${cGuide > 0 ? '-1 指導書' : `-${cost} 金`}）`}
+                            </button>
+                            <p className="text-[9px] font-bold text-slate-500 mt-2">提示：Lv.6 後可選分支；威力提升倍率、省魔降低 MP 消耗。</p>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setLobbyPanelModal(null)}
+                            className="w-full py-2 rounded-xl border border-white/10 bg-slate-900/50 hover:bg-slate-800 text-xs font-black text-slate-200"
+                          >
+                            關閉
+                          </button>
+                        </div>
+                      );
+                    })()
+                  ) : lobbyPanelModal === 'camp' ? (
+                    (() => {
+                      const dishes = [
+                        { id: 'skewer', name: '炙烤肉串', desc: '我方全體攻擊提升（小，2 回合）', cost: 90, apply: { type: 'atkMul', mul: 1.1, turns: 2 } },
+                        { id: 'herb', name: '清風香草', desc: '我方全體魔力提升（小，2 回合）', cost: 90, apply: { type: 'matkMul', mul: 1.12, turns: 2 } },
+                        { id: 'stew', name: '暖湯炖鍋', desc: '我方全體減傷（小，3 回合）', cost: 110, apply: { type: 'defMul', mul: 1.12, turns: 3 } },
+                        { id: 'tea', name: '醒神熱茶', desc: '我方全體開場行動提前（AV -25%）', cost: 120, apply: { type: 'avMul', mul: 0.75 } },
+                      ];
+                      const cTavern = getInvCount(itemInv, 'it_tavern_voucher');
+                      const active = campBuff && typeof campBuff === 'object' ? campBuff : null;
+                      const ownedSet = new Set(campOwnedRecipeIds ?? []);
+                      const ownedRecipes = CAMP_RECIPES.filter((r) => ownedSet.has(r.id));
+
+                      const canAffordRecipe = (r) => gold >= (r?.shopPrice ?? 0);
+                      const buyRecipe = (r) => {
+                        if (!r) return;
+                        if (ownedSet.has(r.id)) return;
+                        if (!canAffordRecipe(r)) return;
+                        setGold((g) => g - (r.shopPrice ?? 0));
+                        setCampOwnedRecipeIds((ids) => Array.from(new Set([...(ids ?? []), r.id])));
+                        setShopDialog(`你買下了「${r.name}」食譜。`);
+                        unlockAudio();
+                        SFX.skill();
+                      };
+
+                      const hasIngredients = (ings) => {
+                        const list = Array.isArray(ings) ? ings : [];
+                        for (const it of list) {
+                          const need = Math.max(0, Math.floor(Number(it?.count) || 0));
+                          const id = String(it?.itemId || '');
+                          if (!id) return false;
+                          if (getInvCount(itemInv, id) < need) return false;
+                        }
+                        return true;
+                      };
+                      const consumeIngredients = (ings) => {
+                        const list = Array.isArray(ings) ? ings : [];
+                        setItemInv((inv) => {
+                          let next = inv;
+                          for (const it of list) {
+                            const need = Math.max(0, Math.floor(Number(it?.count) || 0));
+                            const id = String(it?.itemId || '');
+                            if (!id || need <= 0) continue;
+                            next = incInv(next, id, -need);
+                          }
+                          return next;
+                        });
+                      };
+
+                      const cookRecipe = (r) => {
+                        if (!r) return;
+                        if (active) return; // 已準備時禁止再次點餐
+                        if (!ownedSet.has(r.id)) return;
+                        if (!hasIngredients(r.ingredients)) return;
+                        consumeIngredients(r.ingredients);
+                        setCampBuff({ id: r.id, name: r.name, desc: r.desc, apply: r.apply });
+                        unlockAudio();
+                        SFX.skill();
+                        bumpDailyQuest('camp_dine', 1);
+                      };
+
+                      const craft = (d) => {
+                        if (!d) return;
+                        if (active) return; // 已準備時禁止再次點餐（避免連扣）
+                        if (cTavern > 0) setItemInv((inv) => incInv(inv, 'it_tavern_voucher', -1));
+                        else if (gold < d.cost) return;
+                        else setGold((g) => g - d.cost);
+                        setCampBuff({ id: d.id, name: d.name, desc: d.desc, apply: d.apply });
+                        unlockAudio();
+                        SFX.skill();
+                        bumpDailyQuest('camp_dine', 1);
+                      };
+                      return (
+                        <div className="mt-3 space-y-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setCampTab('menu')}
+                              className={`px-3 py-2 rounded-xl border text-[10px] font-black transition-colors ${
+                                campTab === 'menu'
+                                  ? 'border-amber-500/45 bg-amber-600/15 text-amber-100'
+                                  : 'border-white/10 bg-slate-900/40 text-slate-300 hover:bg-slate-900/55'
+                              }`}
+                            >
+                              金幣料理
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCampTab('recipes')}
+                              className={`px-3 py-2 rounded-xl border text-[10px] font-black transition-colors ${
+                                campTab === 'recipes'
+                                  ? 'border-violet-500/45 bg-violet-600/15 text-violet-100'
+                                  : 'border-white/10 bg-slate-900/40 text-slate-300 hover:bg-slate-900/55'
+                              }`}
+                            >
+                              食譜商店
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCampTab('custom')}
+                              className={`px-3 py-2 rounded-xl border text-[10px] font-black transition-colors ${
+                                campTab === 'custom'
+                                  ? 'border-emerald-500/45 bg-emerald-600/15 text-emerald-100'
+                                  : 'border-white/10 bg-slate-900/40 text-slate-300 hover:bg-slate-900/55'
+                              }`}
+                            >
+                              客制點餐
+                            </button>
+                            <div className="flex-1" />
+                            <span className="text-[10px] font-black text-slate-400">
+                              已擁有食譜 <span className="tabular-nums">{(campOwnedRecipeIds ?? []).length}</span>
+                            </span>
+                          </div>
+
+                          <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-[11px] font-bold text-slate-300">
+                            <span className="text-slate-500">持有金幣：</span>
+                            <span className="tabular-nums text-amber-200">{gold}</span>
+                            <span className="text-slate-600 mx-2">|</span>
+                            <span className="text-slate-500">通用餐卷</span>
+                            <span className="tabular-nums text-violet-200/90">×{cTavern}</span>
+                            <p className="text-[9px] font-bold text-slate-600 mt-1">餐卷僅能用於「金幣料理」分頁；客制點餐僅消耗食材。</p>
+                          </div>
+                          <div className="rounded-xl border border-amber-500/20 bg-amber-950/20 px-3 py-2">
+                            <p className="text-[10px] font-black text-amber-100">目前料理</p>
+                            <p className="text-[10px] font-bold text-amber-200/80 mt-1">
+                              {active ? `${active.name}：${active.desc}` : '（未準備）'}
+                            </p>
+                            <p className="text-[9px] font-bold text-slate-500 mt-1">料理只會在「下一場戰鬥」開場套用一次。</p>
+                            {active ? (
+                              <button
+                                type="button"
+                                onClick={() => setCampBuff(null)}
+                                className="mt-2 w-full py-2 rounded-xl bg-white/5 hover:bg-white/10 text-[11px] font-black text-slate-200 border border-white/10"
+                              >
+                                取消準備
+                              </button>
+                            ) : null}
+                          </div>
+
+                          {campTab === 'menu' ? (
+                            <div className="space-y-2">
+                              {dishes.map((d) => {
+                                const canPayDish = cTavern > 0 || gold >= d.cost;
+                                return (
+                                  <button
+                                    key={d.id}
+                                    type="button"
+                                    disabled={!!active || !canPayDish}
+                                    onClick={() => craft(d)}
+                                    className="w-full rounded-xl border border-white/10 bg-slate-900/40 px-3 py-2 text-left hover:bg-slate-800/60 disabled:opacity-45 disabled:pointer-events-none transition-colors"
+                                  >
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="min-w-0">
+                                        <p className="text-[11px] font-black text-white truncate">{d.name}</p>
+                                        <p className="text-[10px] font-bold text-slate-400 mt-0.5 leading-snug">{d.desc}</p>
+                                      </div>
+                                      <span className="text-[10px] font-black text-amber-200 tabular-nums shrink-0 text-right">
+                                        {cTavern > 0 ? '1 餐卷' : `${d.cost} 金`}
+                                      </span>
+                                    </div>
+                                    {active ? <p className="mt-1 text-[9px] font-bold text-slate-600">已準備餐點：請先取消準備</p> : null}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ) : campTab === 'recipes' ? (
+                            <div className="space-y-2">
+                              {CAMP_RECIPES.map((r) => {
+                                const owned = ownedSet.has(r.id);
+                                const canBuy = !owned && canAffordRecipe(r);
+                                return (
+                                  <button
+                                    key={r.id}
+                                    type="button"
+                                    disabled={!canBuy}
+                                    onClick={() => buyRecipe(r)}
+                                    className="w-full rounded-xl border border-white/10 bg-slate-900/40 px-3 py-2 text-left hover:bg-slate-800/60 disabled:opacity-45 disabled:pointer-events-none transition-colors"
+                                  >
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="min-w-0">
+                                        <p className="text-[11px] font-black text-white truncate">
+                                          {r.name} {owned ? <span className="text-[10px] text-emerald-300/90">（已擁有）</span> : null}
+                                        </p>
+                                        <p className="text-[10px] font-bold text-slate-400 mt-0.5 leading-snug">{r.desc}</p>
+                                        <p className="text-[9px] font-bold text-slate-600 mt-1">
+                                          需要食材：
+                                          {(r.ingredients ?? [])
+                                            .map((x) => `${getItem(x.itemId)?.name ?? x.itemId}×${x.count}`)
+                                            .join('、')}
+                                        </p>
+                                      </div>
+                                      <span className="text-[10px] font-black text-amber-200 tabular-nums shrink-0 text-right">
+                                        {owned ? '—' : `${r.shopPrice} 金`}
+                                      </span>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                              <p className="text-[9px] font-bold text-slate-500">提示：買完食譜後，去「客制點餐」用食材製作強化料理。</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              {ownedRecipes.length === 0 ? (
+                                <p className="text-center text-[11px] font-bold text-slate-500 py-6">你還沒有獨門食譜。先去「食譜商店」買一本吧。</p>
+                              ) : null}
+                              {ownedRecipes.map((r) => {
+                                const canCook = !active && hasIngredients(r.ingredients);
+                                return (
+                                  <button
+                                    key={r.id}
+                                    type="button"
+                                    disabled={!canCook}
+                                    onClick={() => cookRecipe(r)}
+                                    className="w-full rounded-xl border border-white/10 bg-slate-900/40 px-3 py-2 text-left hover:bg-slate-800/60 disabled:opacity-45 disabled:pointer-events-none transition-colors"
+                                  >
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="min-w-0">
+                                        <p className="text-[11px] font-black text-white truncate">{r.name}</p>
+                                        <p className="text-[10px] font-bold text-slate-400 mt-0.5 leading-snug">{r.desc}</p>
+                                        <p className="text-[9px] font-bold text-slate-600 mt-1">
+                                          消耗食材：
+                                          {(r.ingredients ?? [])
+                                            .map((x) => {
+                                              const nm = getItem(x.itemId)?.name ?? x.itemId;
+                                              const owned = getInvCount(itemInv, x.itemId);
+                                              return `${nm}×${x.count}（${owned}）`;
+                                            })
+                                            .join('、')}
+                                        </p>
+                                      </div>
+                                      <span className="text-[10px] font-black text-emerald-200 tabular-nums shrink-0 text-right">
+                                        {active ? '已準備' : canCook ? '可製作' : '不足'}
+                                      </span>
+                                    </div>
+                                    {active ? <p className="mt-1 text-[9px] font-bold text-slate-600">已準備餐點：請先取消準備</p> : null}
+                                  </button>
+                                );
+                              })}
+                              <p className="text-[9px] font-bold text-slate-500">客制點餐不扣金幣與餐卷，只會消耗新鮮食材。</p>
+                            </div>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => setLobbyPanelModal(null)}
+                            className="w-full py-2 rounded-xl border border-white/10 bg-slate-900/50 hover:bg-slate-800 text-xs font-black text-slate-200"
+                          >
+                            關閉
+                          </button>
+                        </div>
+                      );
+                    })()
+                  ) : lobbyPanelModal === 'garden' ? (
+                    <GardenPanel
+                      gardenPlots={gardenPlots}
+                      setGardenPlots={setGardenPlots}
+                      fishCodex={fishCodex}
+                      setFishCodex={setFishCodex}
+                      itemInv={itemInv}
+                      setItemInv={setItemInv}
+                      gold={gold}
+                      setGold={setGold}
+                      prismCount={getShopPrismCount()}
+                      setStarCrystals={setStarCrystals}
+                      onDailyQuest={bumpDailyQuest}
+                      onClose={() => setLobbyPanelModal(null)}
+                    />
+                  ) : (
+                    <>
+                      <p className="text-[12px] text-slate-400 mt-3 leading-relaxed">此功能尚在規劃中。</p>
+                      <button
+                        type="button"
+                        onClick={() => setLobbyPanelModal(null)}
+                        className="mt-5 w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-black text-white"
+                      >
+                        知道了
+                      </button>
+                    </>
+                  )}
                 </>
               )}
             </div>
@@ -6676,6 +9736,7 @@ export default function App() {
                 scene === 'lobby' ||
                 scene === 'party' ||
                 scene === 'stage' ||
+                scene === 'main-story' ||
                 scene === 'exp-stage' ||
                 scene === 'gold-stage' ||
                 scene === 'chapter' ||
